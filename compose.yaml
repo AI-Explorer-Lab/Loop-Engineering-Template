@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-loop_engineering}
+      POSTGRES_USER: ${POSTGRES_USER:-loop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-loop}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-loop} -d ${POSTGRES_DB:-loop_engineering}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - loop-postgres:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      LOOP_ENV: development
+      LOOP_DB__URL: ${LOOP_DB__URL:-postgresql+asyncpg://loop:loop@db:5432/loop_engineering}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  loop-postgres:

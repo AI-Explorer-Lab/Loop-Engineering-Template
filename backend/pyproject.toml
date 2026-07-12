@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loop-engineering-backend"
+version = "0.1.0"
+description = "Phase-one backend scaffold for the Loop Engineering framework"
+requires-python = ">=3.12"
+dependencies = [
+  "aiosqlite>=0.20,<1",
+  "alembic>=1.14,<2",
+  "asyncpg>=0.30,<1",
+  "dynaconf>=3.2,<4",
+  "fastapi>=0.115,<1",
+  "pydantic>=2.10,<3",
+  "PyYAML>=6,<7",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.25,<1",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+loop-api = "main:run"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "config*",
+  "constant*",
+  "controller*",
+  "database*",
+  "domain*",
+  "exceptions*",
+  "mapper*",
+  "middlewares*",
+  "service*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

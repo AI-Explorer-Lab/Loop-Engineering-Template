@@ -1,0 +1,36 @@
+default:
+  app:
+    name: Loop Engineering API
+    version: 0.1.0
+  environment:
+    name: development
+    log_level: INFO
+  auth:
+    enabled: false
+  db:
+    url: postgresql+asyncpg://loop:loop@localhost:5432/loop_engineering
+    pool_size: 10
+    timeout_seconds: 10
+  agent:
+    default_model: ""
+    max_attempts: 3
+
+development:
+  environment:
+    name: development
+
+test:
+  environment:
+    name: test
+    log_level: WARNING
+  db:
+    url: sqlite+aiosqlite:///./.test-loop-engineering.db
+    pool_size: 5
+
+production:
+  environment:
+    name: production
+  auth:
+    enabled: true
+  db:
+    url: ""

@@ -1,0 +1,25 @@
+# Local planning and forward-looking workspaces
+/plan/
+/future/
+
+# Local operating system and secrets
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+*.db
+
+# Frontend
+node_modules/
+dist/
+coverage/
+
+.DS_Store
