@@ -1,6 +1,6 @@
 # Local Orchestrator state and configuration
 .codex-orchestrator/
-orchestrator/backend/config/app.local.yaml
+backend/config/app.local.yaml
 .env
 
 # Python
