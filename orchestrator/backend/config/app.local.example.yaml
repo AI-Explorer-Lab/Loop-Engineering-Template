@@ -1,0 +1,44 @@
+# Copy this file to app.local.yaml. The local file is ignored by Git.
+# Paths may be absolute or relative to the Loop-Engineering-Template root.
+development:
+  agent:
+    harness_enabled: true
+    knowledge:
+      repo_root: /absolute/path/to/Knowledge-Base
+      mcp_registry: /absolute/path/to/mcp/registry.json
+      knowledge_writer_actor_id: orchestrator
+    projects:
+      - id: my-project
+        name: My Project
+        repo_root: /absolute/path/to/my-project
+        default: true
+        knowledge_actor_id: local-user
+        validation:
+          required_paths:
+            - backend/tests
+            - frontend/package.json
+            - frontend/node_modules/.bin/vitest
+            - frontend/node_modules/.bin/vue-tsc
+            - frontend/node_modules/.bin/vite
+          dependency_paths:
+            - frontend/node_modules
+          preflight:
+            - command: [conda, run, -n, my-project, python, -c, "import pytest"]
+              unavailable_message: Project Conda environment or pytest is unavailable
+            - command: [npm, --version]
+              unavailable_message: Node/npm runtime is unavailable
+          test_groups:
+            - name: backend-python
+              root: backend/tests
+              path_base: .
+              suffixes: [.py]
+              command: [conda, run, -n, my-project, pytest, -q, "{tests}"]
+            - name: frontend-typescript
+              root: frontend
+              path_base: frontend
+              suffixes: [.test.ts]
+              command: [npm, --prefix, frontend, test, --, "{tests}"]
+          full_commands:
+            - [conda, run, -n, my-project, pytest, -q, backend/tests]
+            - [npm, --prefix, frontend, test]
+            - [npm, --prefix, frontend, run, build]

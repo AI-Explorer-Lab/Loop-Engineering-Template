@@ -1,25 +1,24 @@
-# Local planning and forward-looking workspaces
-/plan/
-/future/
-
-# Local operating system and secrets
-.DS_Store
+# Local Orchestrator state and configuration
+.codex-orchestrator/
+orchestrator/backend/config/app.local.yaml
 .env
-.env.*
-!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.ruff_cache/
-.venv/
-*.egg-info/
-*.db
+.coverage
+htmlcov/
 
-# Frontend
+# Node
 node_modules/
 dist/
 coverage/
 
+# Task runtime
+.codex-runtime/
+
+# Editors and macOS
 .DS_Store
+.idea/
+.vscode/

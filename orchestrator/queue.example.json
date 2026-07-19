@@ -1,0 +1,20 @@
+{
+  "name": "完成交易管理功能",
+  "base_ref": "HEAD",
+  "subtasks": [
+    {
+      "requirement": "新增交易",
+      "acceptance_criteria": [
+        "可以填写日期、类型、分类、金额和说明并保存交易",
+        "必填字段缺失时返回清晰的输入错误"
+      ]
+    },
+    {
+      "requirement": "展示交易列表",
+      "acceptance_criteria": [
+        "按日期倒序展示已保存的交易",
+        "列表展示日期、分类、类型和金额"
+      ]
+    }
+  ]
+}

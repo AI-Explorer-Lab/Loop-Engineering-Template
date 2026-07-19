@@ -1,0 +1,116 @@
+default:
+  environment:
+    name: development
+    debug: false
+  server:
+    host: 127.0.0.1
+    port: 8100
+    cors_origins:
+      - http://127.0.0.1:8100
+      - http://localhost:8100
+  agent:
+    repo_root: null
+    validation_timeout_seconds: 900
+    max_parallel_projects: 2
+    # Enable after configuring the external Knowledge-Base and MCP paths in
+    # app.local.yaml. The integration code remains part of Orchestrator.
+    harness_enabled: false
+    knowledge:
+      repo_root: null
+      mcp_registry: null
+      knowledge_writer_actor_id: orchestrator
+    projects:
+      - id: orchestrator
+        name: Loop Engineering Orchestrator
+        repo_root: .
+        default: true
+        knowledge_actor_id: local-user
+        validation:
+          required_paths:
+            - orchestrator/tests
+            - orchestrator/backend/tests
+            - orchestrator/frontend/package.json
+            - orchestrator/frontend/node_modules/.bin/vitest
+            - orchestrator/frontend/node_modules/.bin/vue-tsc
+            - orchestrator/frontend/node_modules/.bin/vite
+          dependency_paths:
+            - orchestrator/node_modules
+            - orchestrator/frontend/node_modules
+          preflight:
+            - command:
+                - conda
+                - run
+                - -n
+                - loop-engineering
+                - python
+                - -c
+                - import pytest, mcp, openai_codex
+              unavailable_message: >-
+                Conda environment 'loop-engineering' or Orchestrator Python dependencies are unavailable
+            - command: [npm, --version]
+              unavailable_message: Node/npm runtime is unavailable
+          test_groups:
+            - name: orchestrator-python
+              root: orchestrator/tests
+              path_base: .
+              suffixes: [.py]
+              command:
+                - conda
+                - run
+                - -n
+                - loop-engineering
+                - pytest
+                - -q
+                - "{tests}"
+            - name: api-python
+              root: orchestrator/backend/tests
+              path_base: .
+              suffixes: [.py]
+              command:
+                - conda
+                - run
+                - -n
+                - loop-engineering
+                - pytest
+                - -q
+                - "{tests}"
+            - name: frontend-typescript
+              root: orchestrator/frontend
+              path_base: orchestrator/frontend
+              suffixes: [.test.ts]
+              command:
+                - npm
+                - --prefix
+                - orchestrator/frontend
+                - test
+                - --
+                - "{tests}"
+          full_commands:
+            - [conda, run, -n, loop-engineering, pytest, -q, orchestrator/tests]
+            - [conda, run, -n, loop-engineering, pytest, -q, orchestrator/backend/tests]
+            - [npm, --prefix, orchestrator/frontend, test]
+            - [npm, --prefix, orchestrator/frontend, run, build]
+  notifications:
+    webhook_url: null
+    smtp_host: null
+    smtp_port: 587
+    smtp_starttls: true
+    smtp_username: null
+    smtp_password: null
+    smtp_sender: null
+    smtp_recipient: null
+
+development:
+  environment:
+    name: development
+    debug: true
+
+test:
+  environment:
+    name: test
+    debug: false
+
+production:
+  environment:
+    name: production
+    debug: false

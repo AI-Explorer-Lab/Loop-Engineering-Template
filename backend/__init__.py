@@ -1,1 +1,0 @@
-"""Loop Engineering backend application."""

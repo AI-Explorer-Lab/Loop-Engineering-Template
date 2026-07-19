@@ -1,0 +1,6 @@
+{
+  "requirement": "交易列表支持按最低金额筛选",
+  "acceptance_criteria": [
+    "传入 min_amount=100 时，只返回金额大于或等于 100 的交易"
+  ]
+}

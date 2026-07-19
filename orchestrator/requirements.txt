@@ -1,0 +1,2 @@
+openai-codex==0.1.0b3
+mcp>=1.27,<2

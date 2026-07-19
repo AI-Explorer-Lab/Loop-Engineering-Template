@@ -5,4 +5,5 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-      - -e ./backend[dev]
+      - -r orchestrator/requirements.txt
+      - -r orchestrator/backend/requirements.txt
