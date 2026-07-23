@@ -82,11 +82,7 @@ def prepare_approved_run(
     runs_root = (
         repository / ".codex-orchestrator" / "runs"
         if queue_id is None
-        else repository
-        / ".codex-orchestrator"
-        / "queues"
-        / queue_id
-        / "subtasks"
+        else repository / ".codex-orchestrator" / "queues" / queue_id / "subtasks"
     )
     store = StateStore(repository, runs_root=runs_root)
     state = store.initialize_run(
@@ -150,7 +146,9 @@ def test_delivery_creates_one_review_bound_commit_and_is_idempotent(
     assert git(worktree, "rev-list", "--count", f"{first['parent']}..HEAD") == "1"
     assert git(worktree, "status", "--porcelain") == ""
     assert git(repository, "rev-parse", "main") == first["parent"]
-    assert store.load_state("delivery-single").delivery_status is DeliveryStatus.COMMITTED
+    assert (
+        store.load_state("delivery-single").delivery_status is DeliveryStatus.COMMITTED
+    )
 
 
 def test_delivery_accepts_exact_file_blocks_when_new_file_order_differs(
@@ -168,9 +166,7 @@ def test_delivery_accepts_exact_file_blocks_when_new_file_order_differs(
         store.run_dir("delivery-mixed-order") / "changes" / "final.diff"
     ).read_bytes()
 
-    record = GitDeliveryService(repository, store=store).deliver(
-        "delivery-mixed-order"
-    )
+    record = GitDeliveryService(repository, store=store).deliver("delivery-mixed-order")
 
     committed_diff = subprocess.run(
         [
@@ -190,9 +186,7 @@ def test_delivery_accepts_exact_file_blocks_when_new_file_order_differs(
     assert saved_diff != committed_diff
     assert git(worktree, "show", "HEAD:aaa-new.txt") == "approved new"
     assert git(worktree, "show", "HEAD:two.txt") == "approved two"
-    assert record["staged_diff_sha256"] == hashlib.sha256(
-        committed_diff
-    ).hexdigest()
+    assert record["staged_diff_sha256"] == hashlib.sha256(committed_diff).hexdigest()
 
 
 def test_failed_delivery_recovers_exact_pre_staged_content_with_legacy_order(
@@ -235,9 +229,7 @@ def test_failed_delivery_recovers_exact_pre_staged_content_with_legacy_order(
     )
 
     assert recovered["status"] == "committed"
-    assert recovered["staged_diff_sha256"] == hashlib.sha256(
-        staged_diff
-    ).hexdigest()
+    assert recovered["staged_diff_sha256"] == hashlib.sha256(staged_diff).hexdigest()
     assert git(worktree, "status", "--porcelain") == ""
 
 
@@ -254,16 +246,13 @@ def test_delivery_rejects_different_pre_staged_file_content(
     (worktree / "one.txt").write_text("approved one\n", encoding="utf-8")
 
     with pytest.raises(DeliveryError, match="unexpected pre-staged content"):
-        GitDeliveryService(repository, store=store).deliver(
-            "delivery-staged-tamper"
-        )
+        GitDeliveryService(repository, store=store).deliver("delivery-staged-tamper")
 
-    assert git(worktree, "rev-parse", "HEAD") == git(
-        repository, "rev-parse", "main"
+    assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "main")
+    assert (
+        store.load_state("delivery-staged-tamper").delivery_status
+        is DeliveryStatus.FAILED
     )
-    assert store.load_state(
-        "delivery-staged-tamper"
-    ).delivery_status is DeliveryStatus.FAILED
 
 
 def test_delivery_rejects_post_review_tampering_without_creating_commit(
@@ -319,9 +308,7 @@ class InjectedProcessExit(BaseException):
 
 
 class CrashAfterStaging(GitDeliveryService):
-    def _stage_reviewed_files(
-        self, worktree: Path, reviewed_files: list[str]
-    ) -> None:
+    def _stage_reviewed_files(self, worktree: Path, reviewed_files: list[str]) -> None:
         super()._stage_reviewed_files(worktree, reviewed_files)
         raise InjectedProcessExit("injected exit after staging")
 
@@ -337,14 +324,13 @@ def test_staged_content_is_recovered_when_process_exits_before_intent(
     base = git(worktree, "rev-parse", "HEAD")
 
     with pytest.raises(InjectedProcessExit, match="injected exit after staging"):
-        CrashAfterStaging(repository, store=store).deliver(
-            "delivery-staging-recover"
-        )
+        CrashAfterStaging(repository, store=store).deliver("delivery-staging-recover")
 
     assert git(worktree, "diff", "--cached", "--name-only") == "one.txt"
-    assert store.load_state(
-        "delivery-staging-recover"
-    ).delivery_status is DeliveryStatus.COMMITTING
+    assert (
+        store.load_state("delivery-staging-recover").delivery_status
+        is DeliveryStatus.COMMITTING
+    )
 
     recovered = GitDeliveryService(repository, store=store).deliver(
         "delivery-staging-recover"
@@ -391,9 +377,7 @@ def test_queue_commit_is_one_cumulative_snapshot_from_original_base(
         "queue-delivery-task-01"
     )
     first_diff = (
-        first_store.run_dir("queue-delivery-task-01")
-        / "changes"
-        / "cumulative.diff"
+        first_store.run_dir("queue-delivery-task-01") / "changes" / "cumulative.diff"
     )
     inherited_sha = hashlib.sha256(first_diff.read_bytes()).hexdigest()
 
@@ -413,7 +397,10 @@ def test_queue_commit_is_one_cumulative_snapshot_from_original_base(
     assert second_record["parent"] == first_record["parent"]
     assert git(second_worktree, "show", "HEAD:one.txt") == "queue one"
     assert git(second_worktree, "show", "HEAD:two.txt") == "queue two"
-    assert git(second_worktree, "rev-list", "--count", f"{second_record['parent']}..HEAD") == "1"
+    assert (
+        git(second_worktree, "rev-list", "--count", f"{second_record['parent']}..HEAD")
+        == "1"
+    )
     assert git(first_worktree, "rev-parse", "HEAD") == first_record["commit_sha"]
 
 
@@ -599,14 +586,18 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
     run_dir = store.run_dir("archive-success")
     packet = (run_dir / "archive" / "packet.json").read_text(encoding="utf-8")
     assert completed["status"] == "completed"
-    assert store.load_state("archive-success").delivery_status is DeliveryStatus.ARCHIVED
+    assert (
+        store.load_state("archive-success").delivery_status is DeliveryStatus.ARCHIVED
+    )
     assert role.calls == 1
     assert [name for name, _arguments in client.calls] == [
         "knowledge_workflow_complete"
     ]
     assert "full command logs" in packet
     assert "diff --git" not in packet
-    assert (repository / ".codex-orchestrator/memory/run_summaries/archive-success.json").is_file()
+    assert (
+        repository / ".codex-orchestrator/memory/run_summaries/archive-success.json"
+    ).is_file()
     calls_before_retry = len(client.calls)
     coordinator.archive(
         "archive-success",
@@ -618,6 +609,76 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
         ),
     )
     assert len(client.calls) == calls_before_retry
+    assert role.calls == 1
+
+
+def test_archive_packet_preserves_evaluation_binding_without_command_logs(
+    repository: Path,
+) -> None:
+    store, _worktree, _sha = prepare_approved_run(
+        repository,
+        task_id="archive-evaluation-binding",
+        changes={"one.txt": "bound archive\n"},
+    )
+    run_dir = store.run_dir("archive-evaluation-binding")
+    evaluation = {
+        "schema_version": 2,
+        "validation_round": 1,
+        "validation": {
+            "status": "pass",
+            "evidence_ids": ["VAL-001", "VAL-002"],
+            "evidence_path": "validation/evidence-round-01.json",
+        },
+        "validation_evidence_sha256": "a" * 64,
+        "final_diff_sha256": "b" * 64,
+        "context_sha256": "c" * 64,
+        "changed_files_sha256": "d" * 64,
+        "evaluation_input_sha256": "e" * 64,
+        "requires_repair": False,
+        "requires_human": False,
+    }
+    evaluation_path = run_dir / "evaluations/aggregate.json"
+    evaluation_path.parent.mkdir(parents=True)
+    evaluation_path.write_text(
+        json.dumps(evaluation, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    GitDeliveryService(repository, store=store).deliver("archive-evaluation-binding")
+    role = ArchiveRole()
+    coordinator = archive_coordinator(
+        repository,
+        role,
+        ArchiveClient(),
+    )
+
+    coordinator.archive(
+        "archive-evaluation-binding",
+        store=store,
+        archive_context=ContextSnapshot(
+            stage="archive",
+            query="archive",
+            actor="zhangsan",
+        ),
+    )
+
+    packet_path = run_dir / "archive/packet.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    assert packet["evaluation"] == evaluation
+    packet_text = packet_path.read_text(encoding="utf-8")
+    assert "stdout" not in packet_text
+    assert "stderr" not in packet_text
+    assert "full command logs" in packet_text
+    first_packet = packet_text
+    coordinator.archive(
+        "archive-evaluation-binding",
+        store=store,
+        archive_context=ContextSnapshot(
+            stage="archive",
+            query="archive",
+            actor="zhangsan",
+        ),
+    )
+    assert packet_path.read_text(encoding="utf-8") == first_packet
     assert role.calls == 1
 
 

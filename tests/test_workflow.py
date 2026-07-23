@@ -12,6 +12,14 @@ import pytest
 from codex_loop.audit import AuditRecorder
 from codex_loop.codex_client import CodexRunResult
 from codex_loop.context import ContextSnapshot, merge_context_snapshots
+from codex_loop.evaluation import (
+    ArchitectureEvaluationOutput,
+    EvaluationCoordinator,
+    EvaluationEvidence,
+    SpecCriterionResult,
+    SpecEvaluationOutput,
+    freeze_aggregate,
+)
 from codex_loop.models import (
     CommandResult,
     InfrastructureError,
@@ -24,6 +32,7 @@ from codex_loop.models import (
 from codex_loop.state import ActiveRunError, StateStore, _atomic_write_json
 from codex_loop.workflow import OrchestrationWorkflow
 from codex_loop.workspace import WorkspaceManager
+from codex_loop.validation_evidence import ValidationEvidenceSnapshot
 
 
 class FakeCodexClient:
@@ -81,9 +90,7 @@ class FakeCodexClient:
             usage={"total_tokens": 10},
         )
 
-    def verify_turn_completed(
-        self, expected_turn_count: int
-    ) -> CodexRunResult | None:
+    def verify_turn_completed(self, expected_turn_count: int) -> CodexRunResult | None:
         self.verify_calls.append(expected_turn_count)
         if self.verify_error:
             raise self.verify_error
@@ -233,35 +240,90 @@ class FakeEvaluationCoordinator:
     def evaluate(
         self,
         *,
+        task: TaskSpec,
         context: ContextSnapshot,
-        validation_round: int,
+        changed_files: list[dict[str, Any]],
+        diff_text: str,
+        validation_evidence: Any,
+        validation_evidence_path: str,
         artifact_root: str | Path,
         **_kwargs: Any,
     ) -> dict[str, Any]:
         self.context_hashes.append(context.snapshot_sha256)
-        aggregate = {
-            "schema_version": 1,
-            "validation_round": validation_round,
-            "syntax": {"status": "pass"},
-            "logic": {"status": "pass"},
-            "specification": {"status": "pass"},
-            "architecture": {"status": "not_evaluated"},
-            "requires_repair": False,
-            "blocking_findings": [],
-            "warnings": [],
-            "information": [],
-            "context_sha256": context.snapshot_sha256,
-            **self.outputs.popleft(),
-        }
+        validation_round = validation_evidence.validation_round
+        binding, _normalized = EvaluationCoordinator.input_binding(
+            task=task,
+            context=context,
+            changed_files=changed_files,
+            diff_text=diff_text,
+            validation_evidence=validation_evidence,
+        )
+        evidence_ids = [item.evidence_id for item in validation_evidence.commands]
+        requested = self.outputs.popleft()
+        requested_status = str(requested.get("specification", {}).get("status", "pass"))
+        criteria: list[SpecCriterionResult] = []
+        for index, _criterion in enumerate(task.acceptance_criteria, start=1):
+            evidence = []
+            validation_ids = evidence_ids if requested_status == "pass" else []
+            if requested_status == "fail":
+                evidence = [
+                    EvaluationEvidence(
+                        kind="diff",
+                        source="changes/final.diff",
+                        detail="Fixture-requested specification failure.",
+                    )
+                ]
+            criteria.append(
+                SpecCriterionResult(
+                    acceptance_id=f"AC-{index:03d}",
+                    status=requested_status,
+                    rationale=f"Fixture-requested {requested_status} result.",
+                    validation_evidence_ids=validation_ids,
+                    evidence=evidence,
+                )
+            )
+        spec = SpecEvaluationOutput(
+            criteria=criteria,
+            summary=f"Fixture specification status: {requested_status}.",
+        )
+        architecture = ArchitectureEvaluationOutput(
+            status="not_evaluated",
+            findings=[],
+            summary="No applicable frozen architecture knowledge was available.",
+        )
+        aggregate = freeze_aggregate(
+            EvaluationCoordinator._aggregate(
+                spec=spec,
+                architecture=architecture,
+                context=context,
+                validation_evidence=validation_evidence,
+                validation_evidence_path=validation_evidence_path,
+                binding=binding,
+            )
+        )
         root = Path(artifact_root)
         round_root = root / f"round-{validation_round:02d}"
-        _atomic_write_json(round_root / "spec.json", aggregate["specification"])
+        common = {
+            "schema_version": 2,
+            **binding,
+            "validation_evidence_path": validation_evidence_path,
+        }
         _atomic_write_json(
-            round_root / "architecture.json", aggregate["architecture"]
+            round_root / "spec.json",
+            {**common, "output": spec.model_dump(mode="json")},
+        )
+        _atomic_write_json(
+            round_root / "architecture.json",
+            {**common, "output": architecture.model_dump(mode="json")},
         )
         _atomic_write_json(round_root / "aggregate.json", aggregate)
-        _atomic_write_json(root / "spec.json", aggregate["specification"])
-        _atomic_write_json(root / "architecture.json", aggregate["architecture"])
+        _atomic_write_json(
+            root / "spec.json", {**common, "output": spec.model_dump(mode="json")}
+        )
+        _atomic_write_json(
+            root / "architecture.json",
+            {**common, "output": architecture.model_dump(mode="json")},
+        )
         _atomic_write_json(root / "aggregate.json", aggregate)
         if self.event_sink is not None:
             self.event_sink(
@@ -337,7 +399,12 @@ def workflow_with(
     )
 
 
-def initialize_isolated_run(repo: Path, saved_task: TaskSpec):
+def initialize_isolated_run(
+    repo: Path,
+    saved_task: TaskSpec,
+    *,
+    evidence_required: bool = True,
+):
     store = StateStore(repo)
     workspace = WorkspaceManager(repo).create(saved_task)
     state = store.initialize_run(
@@ -351,7 +418,13 @@ def initialize_isolated_run(repo: Path, saved_task: TaskSpec):
             "source_worktree_was_dirty": workspace.source_worktree_was_dirty,
         },
     )
-    store.save_manifest(saved_task.task_id, workspace.manifest())
+    manifest = workspace.manifest()
+    if evidence_required:
+        manifest["validation_evidence"] = {
+            "required": True,
+            "schema_version": 1,
+        }
+    store.save_manifest(saved_task.task_id, manifest)
     return store, state
 
 
@@ -405,6 +478,30 @@ def test_first_turn_success_creates_thread_state_logs_and_report(repo: Path) -> 
     assert (run_dir / "result.json").is_file()
     assert (run_dir / "report.md").is_file()
     assert len(list((run_dir / "logs/round-01").glob("*.log"))) == 3
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["validation_evidence"] == {
+        "required": True,
+        "schema_version": 1,
+    }
+    evidence = StateStore(repo).load_validation_evidence("workflow-test", 1)
+    assert evidence.status == "pass"
+    assert [item.evidence_id for item in evidence.commands] == [
+        "VAL-001",
+        "VAL-002",
+        "VAL-003",
+    ]
+    assert result.artifacts["validation_evidence"] == (
+        "validation/evidence-round-01.json"
+    )
+    assert result.validation_evidence_sha256 == evidence.snapshot_sha256
+    events = [
+        json.loads(line)
+        for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    event_types = [item["type"] for item in events]
+    assert event_types.index("validation.evidence.frozen") < event_types.index(
+        "validation.completed"
+    )
     saved_state = StateStore(repo).load_state("workflow-test")
     assert saved_state.protected_test_paths == ["backend/tests/test_before.py"]
     assert not (repo / ".codex-orchestrator/active.lock").exists()
@@ -431,14 +528,10 @@ def test_frozen_context_and_four_layer_result_flow_through_workflow(
     assert result.status is RunStatus.SUCCESS
     run_dir = repo / ".codex-orchestrator/runs/workflow-test"
     generation = ContextSnapshot.from_dict(
-        json.loads(
-            (run_dir / "context/generation.json").read_text(encoding="utf-8")
-        )
+        json.loads((run_dir / "context/generation.json").read_text(encoding="utf-8"))
     )
     evaluation = ContextSnapshot.from_dict(
-        json.loads(
-            (run_dir / "context/evaluation.json").read_text(encoding="utf-8")
-        )
+        json.loads((run_dir / "context/evaluation.json").read_text(encoding="utf-8"))
     )
     generation.verify_hash()
     evaluation.verify_hash()
@@ -455,15 +548,35 @@ def test_frozen_context_and_four_layer_result_flow_through_workflow(
     assert aggregate["syntax"]["status"] == "pass"
     assert aggregate["logic"]["status"] == "pass"
     assert aggregate["architecture"]["status"] == "not_evaluated"
+    assert result.artifacts == {
+        **{
+            "manifest": "manifest.json",
+            "permissions": "permissions.json",
+            "events": "events.jsonl",
+            "files": "changes/files.json",
+            "diff": "changes/final.diff",
+            "report": "report.md",
+        },
+        "validation_evidence": "validation/evidence-round-01.json",
+        "spec_evaluation": "evaluations/round-01/spec.json",
+        "architecture_evaluation": "evaluations/round-01/architecture.json",
+        "evaluation_aggregate": "evaluations/round-01/aggregate.json",
+    }
+    for key in (
+        "validation_evidence_sha256",
+        "final_diff_sha256",
+        "context_sha256",
+        "changed_files_sha256",
+        "evaluation_input_sha256",
+    ):
+        assert getattr(result, key) == aggregate[key]
 
 
 def test_blocking_evaluation_reuses_generator_thread_and_frozen_context(
     repo: Path,
 ) -> None:
     client = FakeCodexClient()
-    validator = FakeValidator(
-        [(True, [0, 0, 0]), (True, [0, 0, 0])]
-    )
+    validator = FakeValidator([(True, [0, 0, 0]), (True, [0, 0, 0])])
     contexts = FakeContextAssembler()
     evaluator = FakeEvaluationCoordinator(
         [
@@ -501,17 +614,158 @@ def test_blocking_evaluation_reuses_generator_thread_and_frozen_context(
     generation = ContextSnapshot.from_dict(
         json.loads(
             (
-                repo
-                / ".codex-orchestrator/runs/workflow-test/context/generation.json"
+                repo / ".codex-orchestrator/runs/workflow-test/context/generation.json"
             ).read_text(encoding="utf-8")
         )
     )
-    assert all(
-        generation.snapshot_sha256 in prompt for prompt in client.prompts
-    )
+    assert all(generation.snapshot_sha256 in prompt for prompt in client.prompts)
     assert len(evaluator.context_hashes) == 2
     assert len(set(evaluator.context_hashes)) == 1
     assert [stage for stage, _name in contexts.calls].count("generation") == 1
+
+
+def test_evaluation_repair_then_latest_validation_failure_projects_fresh_aggregate(
+    repo: Path,
+) -> None:
+    evaluator = FakeEvaluationCoordinator([{"specification": {"status": "fail"}}])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator(
+            [(True, [0]), (False, [1]), (False, [1])]
+        ),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.start(task())
+
+    assert result.status is RunStatus.MANUAL_REVIEW
+    assert result.infrastructure_error is None
+    assert [item.passed for item in result.rounds] == [True, False, False]
+    assert len(evaluator.context_hashes) == 1
+    run_dir = StateStore(repo).run_dir("workflow-test")
+    first = json.loads(
+        (run_dir / "evaluations/round-01/aggregate.json").read_text(encoding="utf-8")
+    )
+    latest = json.loads(
+        (run_dir / "evaluations/aggregate.json").read_text(encoding="utf-8")
+    )
+    assert first["validation_round"] == 1
+    assert first["validation"]["status"] == "pass"
+    assert latest["validation_round"] == 3
+    assert latest["validation"]["status"] == "fail"
+    assert latest["evaluation_input_sha256"] == ""
+    assert not (run_dir / "evaluations/spec.json").exists()
+    assert not (run_dir / "evaluations/architecture.json").exists()
+    assert result.artifacts["evaluation_aggregate"] == (
+        "evaluations/round-03/aggregate.json"
+    )
+
+
+def test_requires_human_evaluation_cannot_be_promoted_to_machine_success(
+    repo: Path,
+) -> None:
+    evaluator = FakeEvaluationCoordinator(
+        [
+            {
+                "specification": {"status": "needs_human"},
+                "requires_human": True,
+                "warnings": [
+                    {
+                        "layer": "specification",
+                        "acceptance_id": "AC-001",
+                    }
+                ],
+            }
+        ]
+    )
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([(True, [0])]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.start(task())
+
+    assert result.status is RunStatus.MANUAL_REVIEW
+    assert result.to_dict()["validation"]["passed"] is True
+    assert len(evaluator.context_hashes) == 1
+
+
+def test_failed_validation_rounds_never_call_evaluator(repo: Path) -> None:
+    evaluator = FakeEvaluationCoordinator([])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator(
+            [(False, [1]), (False, [1]), (False, [1])]
+        ),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.start(task())
+
+    assert result.status is RunStatus.MANUAL_REVIEW
+    assert evaluator.context_hashes == []
+    store = StateStore(repo)
+    assert [
+        store.load_validation_evidence("workflow-test", index).status
+        for index in (1, 2, 3)
+    ] == ["fail", "fail", "fail"]
+
+
+def test_validation_rejects_a_diff_changed_by_fixed_commands(repo: Path) -> None:
+    evaluator = FakeEvaluationCoordinator([])
+
+    class WorkspaceMutatingValidator(FakeValidator):
+        def __init__(self, root: Path) -> None:
+            super().__init__([])
+            self.root = root
+
+        def validate(self, round_number: int) -> ValidationRound:
+            self.round_numbers.append(round_number)
+            (self.root / "changed-during-validation.txt").write_text(
+                "unexpected\n",
+                encoding="utf-8",
+            )
+            return ValidationRound(
+                round_number=round_number,
+                full_results=[
+                    CommandResult(
+                        command=["fixed-check"],
+                        cwd=str(self.root),
+                        stage="full",
+                        exit_code=0,
+                        stdout="passed before mutation check",
+                    )
+                ],
+                passed=True,
+                stage="full",
+            )
+
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda root, _baseline: WorkspaceMutatingValidator(root),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.start(task())
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert "changed while fixed validation" in (result.infrastructure_error or "")
+    assert evaluator.context_hashes == []
+    evidence = StateStore(repo).load_validation_evidence("workflow-test", 1)
+    assert evidence.status == "infra_error"
 
 
 def test_effective_permissions_are_verified_before_prompt(repo: Path) -> None:
@@ -538,9 +792,7 @@ def test_effective_permissions_are_verified_before_prompt(repo: Path) -> None:
 
     assert result.status is RunStatus.INFRASTRUCTURE_ERROR
     assert client.prompts == []
-    assert "external-sandbox profile is unknown" in (
-        result.infrastructure_error or ""
-    )
+    assert "external-sandbox profile is unknown" in (result.infrastructure_error or "")
 
 
 def test_one_failure_then_success_uses_one_repair_on_same_thread(repo: Path) -> None:
@@ -559,6 +811,48 @@ def test_one_failure_then_success_uses_one_repair_on_same_thread(repo: Path) -> 
     assert "failure output" in client.prompts[1]
 
 
+def test_repair_diff_does_not_invalidate_the_previous_round_evidence(
+    repo: Path,
+) -> None:
+    class RepairEditingClient(FakeCodexClient):
+        def __init__(self, root: Path) -> None:
+            super().__init__()
+            self.root = root
+
+        def run(self, prompt: str) -> CodexRunResult:
+            result = super().run(prompt)
+            if len(self.prompts) == 2:
+                (self.root / "repair.txt").write_text(
+                    "repaired\n",
+                    encoding="utf-8",
+                )
+            return result
+
+    clients: list[RepairEditingClient] = []
+
+    def client_factory(root: Path) -> RepairEditingClient:
+        client = RepairEditingClient(root)
+        clients.append(client)
+        return client
+
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=client_factory,
+        validator_factory=lambda _root, _baseline: FakeValidator(
+            [(False, [1]), (True, [0])]
+        ),
+    )
+
+    result = workflow.start(task())
+
+    assert result.status is RunStatus.SUCCESS
+    store = StateStore(repo)
+    first = store.load_validation_evidence("workflow-test", 1)
+    second = store.load_validation_evidence("workflow-test", 2)
+    assert first.final_diff_sha256 != second.final_diff_sha256
+    assert len(clients[0].prompts) == 2
+
+
 def test_multiple_failed_commands_in_one_round_increment_only_once(repo: Path) -> None:
     client = FakeCodexClient()
     validator = FakeValidator([(False, [1, 2, 0]), (True, [0, 0, 0])])
@@ -573,9 +867,7 @@ def test_multiple_failed_commands_in_one_round_increment_only_once(repo: Path) -
 
 def test_third_failure_stops_after_initial_and_two_repairs(repo: Path) -> None:
     client = FakeCodexClient()
-    validator = FakeValidator(
-        [(False, [1]), (False, [1]), (False, [1])]
-    )
+    validator = FakeValidator([(False, [1]), (False, [1]), (False, [1])])
 
     result = workflow_with(repo, client, validator).start(task())
 
@@ -589,7 +881,11 @@ def test_third_failure_stops_after_initial_and_two_repairs(repo: Path) -> None:
 
 def test_resume_uses_saved_thread_and_pending_repair(repo: Path) -> None:
     saved_task = task()
-    store, state = initialize_isolated_run(repo, saved_task)
+    store, state = initialize_isolated_run(
+        repo,
+        saved_task,
+        evidence_required=False,
+    )
     state.thread_id = "saved-thread"
     state.turn_count = 1
     failed = FakeValidator([(False, [1])]).validate(1)
@@ -692,7 +988,11 @@ def test_resume_backfills_completed_items_without_duplicate_events(
             "type": "fileChange",
             "status": "completed",
             "changes": [
-                {"path": "declared.txt", "diff": "from Codex\n", "kind": {"type": "add"}}
+                {
+                    "path": "declared.txt",
+                    "diff": "from Codex\n",
+                    "kind": {"type": "add"},
+                }
             ],
         },
         {
@@ -813,21 +1113,44 @@ def test_resume_finishes_saved_passing_validation_without_rerunning_it(
 ) -> None:
     saved_task = task()
     store, state = initialize_isolated_run(repo, saved_task)
-    audit = AuditRecorder(store.run_dir(saved_task.task_id), state.repo_root, state.base_commit)
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
     state.thread_id = "saved-thread"
     state.turn_count = 1
     state.phase = RunPhase.VALIDATING
-    audit.append("validation.started", {}, round_number=1)
+    state.active_validation_round = 1
+    state.validation_start_diff_sha256 = audit.current_diff_sha256()
+    state.last_diff_sha256 = state.validation_start_diff_sha256
+    audit.append(
+        "validation.started",
+        {"diff_sha256": state.validation_start_diff_sha256},
+        round_number=1,
+    )
+    command = CommandResult(
+        command=["validation", "saved"],
+        cwd=state.repo_root,
+        stage="full",
+        exit_code=0,
+        stdout="saved pass",
+    )
+    store.write_command_log(saved_task.task_id, 1, 1, command)
     passed = ValidationRound(
         round_number=1,
-        full_results=[],
+        full_results=[command],
         passed=True,
         stage="full",
     )
     store.save_round(saved_task.task_id, passed)
-    state.add_round(passed)
-    state.phase = RunPhase.VALIDATING
-    state.last_diff_sha256 = audit.current_diff_sha256()
+    evidence = ValidationEvidenceSnapshot.from_round(
+        passed,
+        task_id=saved_task.task_id,
+        base_commit=state.base_commit,
+        final_diff_sha256=state.last_diff_sha256,
+        control_repo_root=repo,
+        run_dir=store.run_dir(saved_task.task_id),
+    )
+    store.save_validation_evidence(saved_task.task_id, evidence)
     store.save_state(state)
     client = FakeCodexClient()
     validator = FakeValidator([])
@@ -839,18 +1162,450 @@ def test_resume_finishes_saved_passing_validation_without_rerunning_it(
     assert audit.has_event("validation.completed", round_number=1)
 
 
-def test_resume_rebuilds_missing_final_artifacts(repo: Path) -> None:
+def test_resume_recovers_diff_change_frozen_during_validation(repo: Path) -> None:
     saved_task = task()
     store, state = initialize_isolated_run(repo, saved_task)
-    audit = AuditRecorder(store.run_dir(saved_task.task_id), state.repo_root, state.base_commit)
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
+    state.thread_id = "saved-thread"
+    state.turn_count = 1
+    state.cycle_turn_count = 1
+    state.phase = RunPhase.VALIDATING
+    state.active_validation_round = 1
+    state.validation_start_diff_sha256 = audit.current_diff_sha256()
+    state.last_diff_sha256 = state.validation_start_diff_sha256
+    audit.append(
+        "validation.started",
+        {"diff_sha256": state.validation_start_diff_sha256},
+        round_number=1,
+    )
+    (Path(state.repo_root) / "changed-during-validation.txt").write_text(
+        "unexpected\n",
+        encoding="utf-8",
+    )
+    final_diff_sha256 = audit.current_diff_sha256()
+    assert final_diff_sha256 != state.validation_start_diff_sha256
+    command = CommandResult(
+        command=["fixed-check"],
+        cwd=state.repo_root,
+        stage="full",
+        exit_code=0,
+        stdout="passed before mutation check",
+    )
+    store.write_command_log(saved_task.task_id, 1, 1, command)
+    message = "Task worktree changed while fixed validation commands were running"
+    frozen_round = ValidationRound(
+        round_number=1,
+        full_results=[command],
+        passed=False,
+        stage="full",
+        failure_summary=message,
+        infrastructure_error=message,
+    )
+    store.save_round(saved_task.task_id, frozen_round)
+    evidence = ValidationEvidenceSnapshot.from_round(
+        frozen_round,
+        task_id=saved_task.task_id,
+        base_commit=state.base_commit,
+        final_diff_sha256=final_diff_sha256,
+        control_repo_root=repo,
+        run_dir=store.run_dir(saved_task.task_id),
+    )
+    store.save_validation_evidence(saved_task.task_id, evidence)
+    store.save_state(state)
+    validator = FakeValidator([])
+    evaluator = FakeEvaluationCoordinator([])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: validator,
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.resume(saved_task.task_id)
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert result.infrastructure_error == message
+    assert validator.round_numbers == []
+    assert evaluator.context_hashes == []
+    assert len(result.rounds) == 1
+    assert result.rounds[0].infrastructure_error == message
+    aggregate = json.loads(
+        (
+            store.run_dir(saved_task.task_id) / "evaluations/round-01/aggregate.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert aggregate["validation_round"] == 1
+    assert aggregate["validation"]["status"] == "infra_error"
+
+
+def test_resume_promotes_command_only_infrastructure_checkpoint(repo: Path) -> None:
+    saved_task = task()
+    store, state = initialize_isolated_run(repo, saved_task)
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
+    state.thread_id = "saved-thread"
+    state.turn_count = 1
+    state.phase = RunPhase.VALIDATING
+    state.active_validation_round = 1
+    state.validation_start_diff_sha256 = audit.current_diff_sha256()
+    state.last_diff_sha256 = state.validation_start_diff_sha256
+    audit.append(
+        "validation.started",
+        {"diff_sha256": state.validation_start_diff_sha256},
+        round_number=1,
+    )
+    command = CommandResult(
+        command=["fixed-check"],
+        cwd=state.repo_root,
+        stage="full",
+        exit_code=None,
+        infrastructure_error="runner unavailable",
+    )
+    store.write_command_log(saved_task.task_id, 1, 1, command)
+    frozen_round = ValidationRound(
+        round_number=1,
+        full_results=[command],
+        passed=False,
+        stage="full",
+        failure_summary="command did not start",
+    )
+    store.save_round(saved_task.task_id, frozen_round)
+    evidence = ValidationEvidenceSnapshot.from_round(
+        frozen_round,
+        task_id=saved_task.task_id,
+        base_commit=state.base_commit,
+        final_diff_sha256=state.last_diff_sha256,
+        control_repo_root=repo,
+        run_dir=store.run_dir(saved_task.task_id),
+    )
+    assert evidence.status == "infra_error"
+    assert evidence.round_infrastructure_error is None
+    store.save_validation_evidence(saved_task.task_id, evidence)
+    store.save_state(state)
+    validator = FakeValidator([])
+
+    result = workflow_with(repo, FakeCodexClient(), validator).resume(
+        saved_task.task_id
+    )
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert result.infrastructure_error == "runner unavailable"
+    assert result.failure_count == 0
+    assert validator.round_numbers == []
+
+
+def test_resume_rejects_required_round_when_evidence_snapshot_is_missing(
+    repo: Path,
+) -> None:
+    saved_task = task()
+    store, state = initialize_isolated_run(repo, saved_task)
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
+    state.thread_id = "saved-thread"
+    state.turn_count = 1
+    command = CommandResult(
+        command=["validation", "saved"],
+        cwd=state.repo_root,
+        stage="full",
+        exit_code=0,
+        stdout="saved pass",
+    )
+    store.write_command_log(saved_task.task_id, 1, 1, command)
+    passed = ValidationRound(
+        round_number=1,
+        full_results=[command],
+        passed=True,
+        stage="full",
+    )
+    store.save_round(saved_task.task_id, passed)
+    state.add_round(passed)
+    state.phase = RunPhase.EVALUATION_PENDING
+    state.last_diff_sha256 = audit.current_diff_sha256()
+    store.save_state(state)
+    old_round_root = store.run_dir(saved_task.task_id) / "evaluations/round-01"
+    _atomic_write_json(
+        old_round_root / "aggregate.json",
+        {"schema_version": 1, "requires_repair": False},
+    )
+    _atomic_write_json(
+        old_round_root / "spec.json",
+        {"schema_version": 1, "output": {"legacy": True}},
+    )
+    _atomic_write_json(
+        old_round_root / "architecture.json",
+        {"schema_version": 1, "output": {"legacy": True}},
+    )
+    evaluator = FakeEvaluationCoordinator([])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.resume(saved_task.task_id)
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert "required validation evidence checkpoint is missing" in (
+        result.infrastructure_error or ""
+    )
+    assert evaluator.context_hashes == []
+
+
+def test_legacy_evaluation_checkpoint_goes_to_human_without_model_call(
+    repo: Path,
+) -> None:
+    saved_task = task()
+    store, state = initialize_isolated_run(
+        repo,
+        saved_task,
+        evidence_required=False,
+    )
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
+    state.thread_id = "saved-thread"
+    state.turn_count = 1
+    passed = ValidationRound(
+        round_number=1,
+        full_results=[],
+        passed=True,
+        stage="full",
+    )
+    store.save_round(saved_task.task_id, passed)
+    state.add_round(passed)
+    state.phase = RunPhase.EVALUATION_PENDING
+    state.last_diff_sha256 = audit.current_diff_sha256()
+    store.save_state(state)
+    evaluator = FakeEvaluationCoordinator([])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.resume(saved_task.task_id)
+
+    assert result.status is RunStatus.MANUAL_REVIEW
+    assert evaluator.context_hashes == []
+    marker = store.load_validation_evidence(saved_task.task_id, 1)
+    assert marker.status == "legacy_evidence_unavailable"
+    aggregate = json.loads(
+        (
+            store.run_dir(saved_task.task_id) / "evaluations/round-01/aggregate.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert aggregate["requires_human"] is True
+    assert aggregate["schema_version"] == 2
+    assert aggregate["validation"]["status"] == "legacy_evidence_unavailable"
+    assert "spec_evaluation" not in result.artifacts
+    assert "architecture_evaluation" not in result.artifacts
+
+
+def test_resume_is_idempotent_when_legacy_marker_is_already_frozen(
+    repo: Path,
+) -> None:
+    saved_task = task()
+    store, state = initialize_isolated_run(
+        repo,
+        saved_task,
+        evidence_required=False,
+    )
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
+    state.thread_id = "saved-thread"
+    state.turn_count = 1
+    passed = ValidationRound(
+        round_number=1,
+        full_results=[],
+        passed=True,
+        stage="full",
+    )
+    store.save_round(saved_task.task_id, passed)
+    state.add_round(passed)
+    state.phase = RunPhase.EVALUATING
+    state.last_diff_sha256 = audit.current_diff_sha256()
+    marker = ValidationEvidenceSnapshot.legacy_unavailable(
+        task_id=saved_task.task_id,
+        validation_round=1,
+        base_commit=state.base_commit,
+        final_diff_sha256=state.last_diff_sha256,
+    )
+    store.save_validation_evidence(saved_task.task_id, marker)
+    store.save_state(state)
+    evaluator = FakeEvaluationCoordinator([])
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = workflow.resume(saved_task.task_id)
+
+    assert result.status is RunStatus.MANUAL_REVIEW
+    assert evaluator.context_hashes == []
+    assert store.load_validation_evidence(saved_task.task_id, 1) == marker
+    events = [
+        json.loads(line)
+        for line in (store.run_dir(saved_task.task_id) / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert (
+        sum(item["type"] == "evaluation.legacy_evidence_unavailable" for item in events)
+        == 1
+    )
+
+
+def test_resume_rejects_tampered_round_specific_aggregate(repo: Path) -> None:
+    first_evaluator = FakeEvaluationCoordinator([{}])
+    first_workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([(True, [0])]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=first_evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+    assert first_workflow.start(task()).status is RunStatus.SUCCESS
+
+    store = StateStore(repo)
+    run_dir = store.run_dir("workflow-test")
+    aggregate_path = run_dir / "evaluations/round-01/aggregate.json"
+    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+    aggregate["evaluation_input_sha256"] = "0" * 64
+    _atomic_write_json(aggregate_path, freeze_aggregate(aggregate))
+    state = store.load_state("workflow-test")
+    state.status = RunStatus.RUNNING
+    state.phase = RunPhase.EVALUATING
+    state.finished_at = None
+    store.save_state(state)
+    evaluator = FakeEvaluationCoordinator([])
+    resume_workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = resume_workflow.resume("workflow-test")
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert "evaluation_input_sha256 binding changed" in (
+        result.infrastructure_error or ""
+    )
+    assert evaluator.context_hashes == []
+
+
+def test_resume_rejects_rehashed_semantic_aggregate_tampering(repo: Path) -> None:
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([(True, [0])]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=FakeEvaluationCoordinator([{}]),  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+    assert workflow.start(task()).status is RunStatus.SUCCESS
+
+    store = StateStore(repo)
+    aggregate_path = (
+        store.run_dir("workflow-test") / "evaluations/round-01/aggregate.json"
+    )
+    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+    aggregate["requires_human"] = True
+    _atomic_write_json(aggregate_path, freeze_aggregate(aggregate))
+    state = store.load_state("workflow-test")
+    state.status = RunStatus.RUNNING
+    state.phase = RunPhase.EVALUATING
+    state.finished_at = None
+    store.save_state(state)
+    evaluator = FakeEvaluationCoordinator([])
+    resume_workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=evaluator,  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = resume_workflow.resume("workflow-test")
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert "evaluation aggregate semantic projection changed" in (
+        result.infrastructure_error or ""
+    )
+    assert evaluator.context_hashes == []
+
+
+def test_final_evaluated_run_requires_aggregate_even_if_context_is_missing(
+    repo: Path,
+) -> None:
+    workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([(True, [0])]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=FakeEvaluationCoordinator([{}]),  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+    assert workflow.start(task()).status is RunStatus.SUCCESS
+
+    store = StateStore(repo)
+    run_dir = store.run_dir("workflow-test")
+    (run_dir / "evaluations/round-01/aggregate.json").unlink()
+    (run_dir / "context/evaluation.json").unlink()
+    resume_workflow = OrchestrationWorkflow(
+        repo,
+        client_factory=lambda _root: FakeCodexClient(),
+        validator_factory=lambda _root, _baseline: FakeValidator([]),
+        context_assembler=FakeContextAssembler(),  # type: ignore[arg-type]
+        evaluation_coordinator=FakeEvaluationCoordinator([]),  # type: ignore[arg-type]
+        knowledge_actor_id="zhangsan",
+    )
+
+    result = resume_workflow.resume("workflow-test")
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert "missing its round aggregate" in (result.infrastructure_error or "")
+
+
+def test_resume_rebuilds_missing_final_artifacts(repo: Path) -> None:
+    saved_task = task()
+    store, state = initialize_isolated_run(
+        repo,
+        saved_task,
+        evidence_required=False,
+    )
+    audit = AuditRecorder(
+        store.run_dir(saved_task.task_id), state.repo_root, state.base_commit
+    )
     (Path(state.repo_root) / "finished.txt").write_text("done\n", encoding="utf-8")
     state.last_diff_sha256 = audit.current_diff_sha256()
     state.mark_success("?? finished.txt")
     store.save_state(state)
 
-    result = workflow_with(
-        repo, FakeCodexClient(), FakeValidator([])
-    ).resume(saved_task.task_id)
+    result = workflow_with(repo, FakeCodexClient(), FakeValidator([])).resume(
+        saved_task.task_id
+    )
 
     assert result.status is RunStatus.SUCCESS
     run_dir = store.run_dir(saved_task.task_id)
@@ -929,9 +1684,9 @@ def test_stale_lock_allows_a_to_resume_then_b_can_start_after_a_finishes(
     )
 
     with pytest.raises(ActiveRunError, match="unfinished task.*workflow-test"):
-        workflow_with(
-            repo, FakeCodexClient(), FakeValidator([(True, [0])])
-        ).start(second)
+        workflow_with(repo, FakeCodexClient(), FakeValidator([(True, [0])])).start(
+            second
+        )
 
     first_result = workflow_with(
         repo, FakeCodexClient(), FakeValidator([(True, [0])])
@@ -1016,6 +1771,101 @@ def test_validation_infrastructure_error_persists_partial_command_logs(
     assert len(list(log_dir.glob("*.log"))) == 2
 
 
+def test_command_infrastructure_error_is_promoted_to_round_and_stops(
+    repo: Path,
+) -> None:
+    class CommandOnlyInfrastructureValidator(FakeValidator):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        def validate(self, round_number: int) -> ValidationRound:
+            self.round_numbers.append(round_number)
+            failed_to_start = CommandResult(
+                command=["second-check"],
+                cwd=str(repo),
+                stage="full",
+                exit_code=None,
+                infrastructure_error="npm could not start",
+            )
+            return ValidationRound(
+                round_number=round_number,
+                full_results=[failed_to_start],
+                passed=False,
+                stage="full",
+                failure_summary="command did not start",
+            )
+
+    validator = CommandOnlyInfrastructureValidator()
+
+    result = workflow_with(repo, FakeCodexClient(), validator).start(task())
+
+    assert result.status is RunStatus.INFRASTRUCTURE_ERROR
+    assert result.failure_count == 0
+    assert result.rounds[0].infrastructure_error == "npm could not start"
+    store = StateStore(repo)
+    evidence = store.load_validation_evidence("workflow-test", 1)
+    assert evidence.status == "infra_error"
+    aggregate = json.loads(
+        (store.run_dir("workflow-test") / "evaluations/aggregate.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert aggregate["validation_round"] == 1
+    assert aggregate["validation"]["status"] == "infra_error"
+
+
+def test_failed_split_secret_round_repairs_without_checkpoint_conflict(
+    repo: Path,
+) -> None:
+    secret = "opaque-validation-secret"
+
+    class SecretFailureValidator(FakeValidator):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.calls = 0
+
+        def validate(self, round_number: int) -> ValidationRound:
+            self.round_numbers.append(round_number)
+            self.calls += 1
+            if self.calls == 1:
+                command = CommandResult(
+                    command=["fixed-check", "--token", secret],
+                    cwd=str(repo),
+                    stage="full",
+                    exit_code=1,
+                )
+                return ValidationRound(
+                    round_number=round_number,
+                    full_results=[command],
+                    passed=False,
+                    stage="full",
+                    failure_summary=(f"fixed-check --token {secret}: exit code 1"),
+                )
+            command = CommandResult(
+                command=["fixed-check"],
+                cwd=str(repo),
+                stage="full",
+                exit_code=0,
+            )
+            return ValidationRound(
+                round_number=round_number,
+                full_results=[command],
+                passed=True,
+                stage="full",
+            )
+
+    client = FakeCodexClient()
+    validator = SecretFailureValidator()
+
+    result = workflow_with(repo, client, validator).start(task())
+
+    assert result.status is RunStatus.SUCCESS
+    assert validator.round_numbers == [1, 2]
+    assert len(client.prompts) == 2
+    assert secret not in client.prompts[1]
+    assert "--token [REDACTED]" in client.prompts[1]
+
+
 @pytest.mark.parametrize(
     "failure_location",
     ["validation_preflight", "sdk_preflight", "turn", "validation"],
@@ -1030,9 +1880,7 @@ def test_infrastructure_error_stops_without_counting_validation_failure(
     )
     validator = FakeValidator(
         [(True, [0])],
-        preflight_error=(
-            error if failure_location == "validation_preflight" else None
-        ),
+        preflight_error=(error if failure_location == "validation_preflight" else None),
         validate_error=error if failure_location == "validation" else None,
     )
     if failure_location in {"validation_preflight", "sdk_preflight"}:

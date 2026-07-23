@@ -13,13 +13,14 @@ import shlex
 import socket
 import tempfile
 import time
-from typing import Any, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 from uuid import uuid4
 
 from .models import (
     QUEUE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     CommandResult,
+    InfrastructureError,
     QueueState,
     QueueStatus,
     ReviewRecord,
@@ -32,6 +33,9 @@ from .models import (
     utc_now_iso,
 )
 
+if TYPE_CHECKING:
+    from .validation_evidence import ValidationEvidenceSnapshot
+
 
 class ActiveRunError(RuntimeError):
     """Raised when another live process owns the repository-wide task lock."""
@@ -43,7 +47,9 @@ def has_only_plan_artifacts(path: Path) -> bool:
     if not path.is_dir():
         return False
     entries = list(path.iterdir())
-    return bool(entries) and all(entry.name == "plan" and entry.is_dir() for entry in entries)
+    return bool(entries) and all(
+        entry.name == "plan" and entry.is_dir() for entry in entries
+    )
 
 
 _SENSITIVE_NAME = re.compile(
@@ -68,11 +74,28 @@ _PREFIXED_TOKEN = re.compile(
     r"npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
     r"(?:AKIA|ASIA)[A-Z0-9]{16})\b"
 )
-_JWT = re.compile(
-    r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"
-)
-_URI_PASSWORD = re.compile(
-    r"(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+:)([^@\s/]+)(@)"
+_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b")
+_URI_PASSWORD = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+:)([^@\s/]+)(@)")
+_SENSITIVE_COMMAND_OPTIONS = {
+    "access-key",
+    "access-token",
+    "api-key",
+    "authorization",
+    "client-secret",
+    "credential",
+    "password",
+    "passwd",
+    "private-key",
+    "pwd",
+    "refresh-token",
+    "secret",
+    "token",
+}
+_SENSITIVE_SPLIT_ARGUMENT = re.compile(
+    r"(?i)(?<!\S)(-{1,2}(?:access[-_]?key|access[-_]?token|api[-_]?key|"
+    r"authorization|client[-_]?secret|credential|password|passwd|private[-_]?key|"
+    r"pwd|refresh[-_]?token|secret|token))(\s+)"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
 )
 
 
@@ -102,14 +125,15 @@ def redact_sensitive_text(
     redacted = str(text)
     for value in _sensitive_environment_values(environ):
         redacted = redacted.replace(value, "[REDACTED]")
-    redacted = _AUTH_SCHEME.sub(
-        lambda match: f"{match.group(1)} [REDACTED]", redacted
-    )
+    redacted = _AUTH_SCHEME.sub(lambda match: f"{match.group(1)} [REDACTED]", redacted)
     redacted = _API_KEY.sub("[REDACTED]", redacted)
     redacted = _PREFIXED_TOKEN.sub("[REDACTED]", redacted)
     redacted = _JWT.sub("[REDACTED]", redacted)
     redacted = _URI_PASSWORD.sub(
         lambda match: f"{match.group(1)}[REDACTED]{match.group(3)}", redacted
+    )
+    redacted = _SENSITIVE_SPLIT_ARGUMENT.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", redacted
     )
     redacted = _ASSIGNED_QUOTED.sub(
         lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]{match.group(4)}",
@@ -118,6 +142,25 @@ def redact_sensitive_text(
     redacted = _ASSIGNED_PLAIN.sub(
         lambda match: f"{match.group(1)}[REDACTED]", redacted
     )
+    return redacted
+
+
+def redact_sensitive_arguments(arguments: list[str]) -> list[str]:
+    """Redact argv values, including secrets passed after a named option."""
+
+    redacted: list[str] = []
+    redact_next = False
+    for argument in arguments:
+        value = str(argument)
+        if redact_next:
+            redacted.append("[REDACTED]")
+            redact_next = False
+            continue
+        safe_value = redact_sensitive_text(value)
+        redacted.append(safe_value)
+        option = value.lstrip("-").lower().replace("_", "-")
+        if option in _SENSITIVE_COMMAND_OPTIONS and safe_value == value:
+            redact_next = True
     return redacted
 
 
@@ -365,9 +408,16 @@ class StateStore:
         path = self.run_dir(task_id) / "events.jsonl"
         sequence = 1
         if path.is_file():
-            sequence = len(
-                [line for line in path.read_text(encoding="utf-8").splitlines() if line]
-            ) + 1
+            sequence = (
+                len(
+                    [
+                        line
+                        for line in path.read_text(encoding="utf-8").splitlines()
+                        if line
+                    ]
+                )
+                + 1
+            )
         event = redact_sensitive_data(
             {
                 "schema_version": SCHEMA_VERSION,
@@ -407,9 +457,7 @@ class StateStore:
     def load_manifest(self, task_id: str) -> dict[str, Any]:
         return _read_json(self.run_dir(task_id) / "manifest.json")
 
-    def save_permissions(
-        self, task_id: str, permissions: Mapping[str, Any]
-    ) -> Path:
+    def save_permissions(self, task_id: str, permissions: Mapping[str, Any]) -> Path:
         path = self.run_dir(task_id) / "permissions.json"
         _atomic_write_json(path, permissions)
         return path
@@ -425,9 +473,7 @@ class StateStore:
         return path
 
     def load_review(self, task_id: str) -> ReviewRecord:
-        return ReviewRecord.from_dict(
-            _read_json(self.run_dir(task_id) / "review.json")
-        )
+        return ReviewRecord.from_dict(_read_json(self.run_dir(task_id) / "review.json"))
 
     def save_review_history(self, review: ReviewRecord) -> Path:
         reviews_dir = self.run_dir(review.task_id) / "reviews"
@@ -486,17 +532,55 @@ class StateStore:
         return path
 
     def save_round(self, task_id: str, validation_round: ValidationRound) -> Path:
-        path = (
-            self.run_dir(task_id)
-            / "rounds"
-            / f"round-{validation_round.round_number:02d}.json"
-        )
-        _atomic_write_json(path, validation_round.to_dict(include_output=False))
+        path = self.round_path(task_id, validation_round.round_number)
+        value = redact_sensitive_data(validation_round.to_dict(include_output=False))
+        if not isinstance(value, dict):
+            raise TypeError("validation round projection must be an object")
+        if path.is_file():
+            if _read_json(path) != value:
+                raise InfrastructureError(
+                    "validation round is immutable once persisted"
+                )
+            return path
+        _atomic_write_json(path, value)
         return path
 
+    def round_path(self, task_id: str, round_number: int) -> Path:
+        if int(round_number) < 1:
+            raise ValueError("round_number must be at least 1")
+        return self.run_dir(task_id) / "rounds" / f"round-{int(round_number):02d}.json"
+
     def load_round(self, task_id: str, round_number: int) -> ValidationRound:
-        path = self.run_dir(task_id) / "rounds" / f"round-{round_number:02d}.json"
-        return ValidationRound.from_dict(_read_json(path))
+        return ValidationRound.from_dict(
+            _read_json(self.round_path(task_id, round_number))
+        )
+
+    def validation_evidence_path(self, task_id: str, round_number: int) -> Path:
+        if int(round_number) < 1:
+            raise ValueError("round_number must be at least 1")
+        return (
+            self.run_dir(task_id)
+            / "validation"
+            / f"evidence-round-{int(round_number):02d}.json"
+        )
+
+    def save_validation_evidence(
+        self, task_id: str, evidence: "ValidationEvidenceSnapshot"
+    ) -> Path:
+        if evidence.task_id != task_id:
+            raise ValueError("validation evidence task_id does not match target run")
+        return evidence.save(
+            self.validation_evidence_path(task_id, evidence.validation_round)
+        )
+
+    def load_validation_evidence(
+        self, task_id: str, round_number: int
+    ) -> "ValidationEvidenceSnapshot":
+        from .validation_evidence import ValidationEvidenceSnapshot
+
+        return ValidationEvidenceSnapshot.load(
+            self.validation_evidence_path(task_id, round_number)
+        )
 
     def write_command_log(
         self,
@@ -514,6 +598,7 @@ class StateStore:
             / f"round-{round_number:02d}"
             / f"{command_index:02d}-{stage}.log"
         )
+        result.command = redact_sensitive_arguments(result.command)
         content = "\n".join(
             [
                 f"command: {shlex.join(result.command)}",
@@ -675,7 +760,9 @@ class QueueStore:
         return path
 
     def load_spec(self, queue_id: str) -> TaskQueueSpec:
-        return TaskQueueSpec.from_dict(_read_json(self.queue_dir(queue_id) / "queue.json"))
+        return TaskQueueSpec.from_dict(
+            _read_json(self.queue_dir(queue_id) / "queue.json")
+        )
 
     def save_state(self, state: QueueState) -> Path:
         state.touch()
