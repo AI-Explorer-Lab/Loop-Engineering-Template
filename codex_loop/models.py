@@ -340,15 +340,9 @@ class TaskSpec(JsonModel):
             acceptance_criteria=list(criteria),
             created_at=str(data.get("created_at") or utc_now_iso()),
             schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
-            queue_id=(
-                None if data.get("queue_id") is None else str(data["queue_id"])
-            ),
-            sequence=(
-                None if data.get("sequence") is None else int(data["sequence"])
-            ),
-            rerun_of=(
-                None if data.get("rerun_of") is None else str(data["rerun_of"])
-            ),
+            queue_id=(None if data.get("queue_id") is None else str(data["queue_id"])),
+            sequence=(None if data.get("sequence") is None else int(data["sequence"])),
+            rerun_of=(None if data.get("rerun_of") is None else str(data["rerun_of"])),
         )
 
     @classmethod
@@ -474,9 +468,7 @@ class TaskQueueSpec(JsonModel):
             base_commit=str(data.get("base_commit", "")),
             created_at=str(data.get("created_at") or utc_now_iso()),
             schema_version=int(data.get("schema_version", QUEUE_SCHEMA_VERSION)),
-            rerun_of=(
-                None if data.get("rerun_of") is None else str(data["rerun_of"])
-            ),
+            rerun_of=(None if data.get("rerun_of") is None else str(data["rerun_of"])),
             subtasks=[TaskSpec.from_dict(item) for item in values],
         )
 
@@ -662,9 +654,7 @@ class CommandResult(JsonModel):
     @property
     def passed(self) -> bool:
         return (
-            self.exit_code == 0
-            and not self.timed_out
-            and not self.infrastructure_error
+            self.exit_code == 0 and not self.timed_out and not self.infrastructure_error
         )
 
     @property
@@ -715,13 +705,9 @@ class CommandResult(JsonModel):
                 if data.get("infrastructure_error") is None
                 else str(data["infrastructure_error"])
             ),
-            log_path=(
-                None if data.get("log_path") is None else str(data["log_path"])
-            ),
+            log_path=(None if data.get("log_path") is None else str(data["log_path"])),
             log_sha256=(
-                None
-                if data.get("log_sha256") is None
-                else str(data["log_sha256"])
+                None if data.get("log_sha256") is None else str(data["log_sha256"])
             ),
         )
 
@@ -836,6 +822,8 @@ class RunState(JsonModel):
     turn_count: int = 0
     cycle_turn_count: int = 0
     rounds: list[ValidationRound] = field(default_factory=list)
+    active_validation_round: int | None = None
+    validation_start_diff_sha256: str = ""
     baseline_test_hashes: dict[str, str] = field(default_factory=dict)
     protected_test_paths: list[str] = field(default_factory=list)
     baseline_git_status: str = ""
@@ -1006,6 +994,8 @@ class RunState(JsonModel):
                 validation_round.to_dict(include_output=include_output)
                 for validation_round in self.rounds
             ],
+            "active_validation_round": self.active_validation_round,
+            "validation_start_diff_sha256": self.validation_start_diff_sha256,
             "baseline_test_hashes": dict(self.baseline_test_hashes),
             "protected_test_paths": sorted(set(self.protected_test_paths)),
             "baseline_git_status": self.baseline_git_status,
@@ -1025,12 +1015,8 @@ class RunState(JsonModel):
             task_id=str(data["task_id"]),
             repo_root=str(data["repo_root"]),
             schema_version=int(data.get("schema_version", 0)),
-            queue_id=(
-                None if data.get("queue_id") is None else str(data["queue_id"])
-            ),
-            sequence=(
-                None if data.get("sequence") is None else int(data["sequence"])
-            ),
+            queue_id=(None if data.get("queue_id") is None else str(data["queue_id"])),
+            sequence=(None if data.get("sequence") is None else int(data["sequence"])),
             inherited_baseline=bool(data.get("inherited_baseline", False)),
             inherited_diff_sha256=str(data.get("inherited_diff_sha256", "")),
             control_repo_root=str(data.get("control_repo_root", "")),
@@ -1066,14 +1052,18 @@ class RunState(JsonModel):
             cycle_turn_count=int(
                 data.get("cycle_turn_count", data.get("turn_count", 0))
             ),
-            rounds=[
-                ValidationRound.from_dict(item) for item in data.get("rounds", [])
-            ],
+            rounds=[ValidationRound.from_dict(item) for item in data.get("rounds", [])],
+            active_validation_round=(
+                None
+                if data.get("active_validation_round") is None
+                else int(data["active_validation_round"])
+            ),
+            validation_start_diff_sha256=str(
+                data.get("validation_start_diff_sha256", "")
+            ),
             baseline_test_hashes={
                 str(path): str(digest)
-                for path, digest in dict(
-                    data.get("baseline_test_hashes", {})
-                ).items()
+                for path, digest in dict(data.get("baseline_test_hashes", {})).items()
             },
             protected_test_paths=sorted(
                 {str(path) for path in data.get("protected_test_paths", [])}
@@ -1086,9 +1076,7 @@ class RunState(JsonModel):
                 if data.get("infrastructure_error") is None
                 else str(data["infrastructure_error"])
             ),
-            pending_evaluation_summary=str(
-                data.get("pending_evaluation_summary", "")
-            ),
+            pending_evaluation_summary=str(data.get("pending_evaluation_summary", "")),
             started_at=str(data.get("started_at") or utc_now_iso()),
             updated_at=str(data.get("updated_at") or utc_now_iso()),
             finished_at=(
@@ -1112,6 +1100,7 @@ class RunResult(JsonModel):
     rounds: list[ValidationRound]
     baseline_git_status: str
     final_git_summary: str
+    active_validation_round: int | None = None
     schema_version: int = SCHEMA_VERSION
     queue_id: str | None = None
     sequence: int | None = None
@@ -1121,6 +1110,10 @@ class RunResult(JsonModel):
     permissions: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[str, str] = field(default_factory=dict)
     final_diff_sha256: str = ""
+    validation_evidence_sha256: str = ""
+    context_sha256: str = ""
+    changed_files_sha256: str = ""
+    evaluation_input_sha256: str = ""
     diff_redaction_count: int = 0
     log_paths: list[str] = field(default_factory=list)
     infrastructure_error: str | None = None
@@ -1154,6 +1147,7 @@ class RunResult(JsonModel):
             rounds=list(state.rounds),
             baseline_git_status=state.baseline_git_status,
             final_git_summary=state.final_git_summary,
+            active_validation_round=state.active_validation_round,
             schema_version=state.schema_version,
             queue_id=state.queue_id,
             sequence=state.sequence,
@@ -1183,6 +1177,71 @@ class RunResult(JsonModel):
             finished_at=state.finished_at or utc_now_iso(),
         )
 
+    def attach_evaluation_artifacts(self, run_dir: str | Path) -> None:
+        """Attach only immutable evidence/evaluation artifacts that actually exist."""
+
+        if self.active_validation_round is not None or not self.rounds:
+            return
+        root = Path(run_dir)
+        round_number = self.rounds[-1].round_number
+        evidence = root / "validation" / f"evidence-round-{round_number:02d}.json"
+        evidence_status = ""
+        if evidence.is_file():
+            evidence_value = json.loads(evidence.read_text(encoding="utf-8"))
+            if not isinstance(evidence_value, Mapping):
+                raise InfrastructureError(
+                    "validation evidence artifact must be an object"
+                )
+            self.artifacts["validation_evidence"] = evidence.relative_to(
+                root
+            ).as_posix()
+            self.validation_evidence_sha256 = str(
+                evidence_value.get("snapshot_sha256", "")
+            )
+            evidence_status = str(evidence_value.get("status", ""))
+
+        evaluation_root = root / "evaluations" / f"round-{round_number:02d}"
+        artifact_names = {
+            "spec_evaluation": evaluation_root / "spec.json",
+            "architecture_evaluation": evaluation_root / "architecture.json",
+            "evaluation_aggregate": evaluation_root / "aggregate.json",
+        }
+        aggregate_path = artifact_names["evaluation_aggregate"]
+        if not aggregate_path.is_file():
+            return
+        aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+        if not isinstance(aggregate, Mapping):
+            raise InfrastructureError("evaluation aggregate artifact must be an object")
+        if self.status is RunStatus.INFRASTRUCTURE_ERROR and evidence_status == "pass":
+            return
+        aggregate_diff_sha256 = str(aggregate.get("final_diff_sha256", ""))
+        if aggregate_diff_sha256 != self.final_diff_sha256:
+            if self.status in {RunStatus.SUCCESS, RunStatus.MANUAL_REVIEW}:
+                raise InfrastructureError(
+                    "result and evaluation aggregate disagree on final Diff hash"
+                )
+            return
+        aggregate_evidence_sha256 = str(aggregate.get("validation_evidence_sha256", ""))
+        if (
+            self.validation_evidence_sha256
+            and aggregate_evidence_sha256 != self.validation_evidence_sha256
+        ):
+            raise InfrastructureError(
+                "result artifacts disagree on validation evidence hash"
+            )
+        self.validation_evidence_sha256 = aggregate_evidence_sha256
+        for name, path in artifact_names.items():
+            if evidence_status != "pass" and name in {
+                "spec_evaluation",
+                "architecture_evaluation",
+            }:
+                continue
+            if path.is_file():
+                self.artifacts[name] = path.relative_to(root).as_posix()
+        self.context_sha256 = str(aggregate.get("context_sha256", ""))
+        self.changed_files_sha256 = str(aggregate.get("changed_files_sha256", ""))
+        self.evaluation_input_sha256 = str(aggregate.get("evaluation_input_sha256", ""))
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
@@ -1202,11 +1261,12 @@ class RunResult(JsonModel):
             "failure_count": self.failure_count,
             "validation": {
                 "passed": bool(
-                    self.status is RunStatus.SUCCESS
+                    self.active_validation_round is None
                     and self.rounds
                     and self.rounds[-1].passed
                 ),
                 "rounds": len(self.rounds),
+                "active_round": self.active_validation_round,
             },
             "rounds": [
                 validation_round.to_dict(include_output=False)
@@ -1218,6 +1278,10 @@ class RunResult(JsonModel):
             "permissions": dict(self.permissions),
             "artifacts": dict(self.artifacts),
             "final_diff_sha256": self.final_diff_sha256,
+            "validation_evidence_sha256": self.validation_evidence_sha256,
+            "context_sha256": self.context_sha256,
+            "changed_files_sha256": self.changed_files_sha256,
+            "evaluation_input_sha256": self.evaluation_input_sha256,
             "diff_redaction_count": self.diff_redaction_count,
             "log_paths": list(self.log_paths),
             "infrastructure_error": self.infrastructure_error,
@@ -1227,6 +1291,10 @@ class RunResult(JsonModel):
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RunResult":
+        validation = data.get("validation", {})
+        active_round = (
+            validation.get("active_round") if isinstance(validation, Mapping) else None
+        )
         return cls(
             task_id=str(data["task_id"]),
             status=RunStatus(str(data.get("machine_status", data.get("status")))),
@@ -1240,18 +1308,15 @@ class RunResult(JsonModel):
             ),
             turn_count=int(data.get("turn_count", 0)),
             failure_count=int(data.get("failure_count", 0)),
-            rounds=[
-                ValidationRound.from_dict(item) for item in data.get("rounds", [])
-            ],
+            rounds=[ValidationRound.from_dict(item) for item in data.get("rounds", [])],
             baseline_git_status=str(data.get("baseline_git_status", "")),
             final_git_summary=str(data.get("final_git_summary", "")),
+            active_validation_round=(
+                None if active_round is None else int(active_round)
+            ),
             schema_version=int(data.get("schema_version", 0)),
-            queue_id=(
-                None if data.get("queue_id") is None else str(data["queue_id"])
-            ),
-            sequence=(
-                None if data.get("sequence") is None else int(data["sequence"])
-            ),
+            queue_id=(None if data.get("queue_id") is None else str(data["queue_id"])),
+            sequence=(None if data.get("sequence") is None else int(data["sequence"])),
             review_status=ReviewStatus(
                 str(data.get("review_status", ReviewStatus.PENDING.value))
             ),
@@ -1259,7 +1324,8 @@ class RunResult(JsonModel):
                 str(data.get("delivery_status", DeliveryStatus.NOT_READY.value))
             ),
             workspace={
-                str(key): value for key, value in dict(data.get("workspace", {})).items()
+                str(key): value
+                for key, value in dict(data.get("workspace", {})).items()
             },
             permissions={
                 str(key): value
@@ -1270,6 +1336,10 @@ class RunResult(JsonModel):
                 for key, value in dict(data.get("artifacts", {})).items()
             },
             final_diff_sha256=str(data.get("final_diff_sha256", "")),
+            validation_evidence_sha256=str(data.get("validation_evidence_sha256", "")),
+            context_sha256=str(data.get("context_sha256", "")),
+            changed_files_sha256=str(data.get("changed_files_sha256", "")),
+            evaluation_input_sha256=str(data.get("evaluation_input_sha256", "")),
             diff_redaction_count=int(data.get("diff_redaction_count", 0)),
             log_paths=[str(path) for path in data.get("log_paths", [])],
             infrastructure_error=(

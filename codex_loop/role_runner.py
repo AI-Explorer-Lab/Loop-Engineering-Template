@@ -13,7 +13,12 @@ from pydantic import BaseModel, ValidationError
 
 from .codex_client import CodexClient
 from .models import InfrastructureError, utc_now_iso
-from .state import _atomic_write_json, _atomic_write_text, redact_sensitive_text
+from .state import (
+    _atomic_write_json,
+    _atomic_write_text,
+    redact_sensitive_text,
+    sanitize_for_codex,
+)
 
 
 ROLE_INSTRUCTIONS = {
@@ -24,13 +29,30 @@ ROLE_INSTRUCTIONS = {
     ),
     "spec_evaluator": (
         "You are an independent specification evaluator. Judge only supplied acceptance "
-        "criteria, evidence, diff excerpts, and frozen knowledge. Return only schema-valid "
-        "JSON. Do not edit files or invoke tools."
+        "criteria, frozen validation evidence, diff excerpts, changed files, and frozen "
+        "knowledge. For every acceptance criterion, return validation_evidence_ids, "
+        "evidence, and knowledge_citations as arrays; use [] when a category is not "
+        "needed. Cite commands only by supplied "
+        "VAL-NNN ids. Never invent command_index, command metadata, logs, hashes, or test "
+        "runs. A passing command proves only that command succeeded. A criterion explicitly "
+        "requiring tests, builds, lint, compilation, or another fixed check may cite the "
+        "corresponding VAL-NNN directly. A business-behavior criterion also needs a relevant "
+        "diff or changed-file location; green commands alone do not prove its semantics. "
+        "Every pass or fail result must cite at least one supplied VAL-NNN, diff/changed-file "
+        "evidence item, or frozen knowledge citation; otherwise return needs_human or "
+        "not_evaluated. "
+        "Generic evidence kind must never be test. Return only schema-valid JSON. Do not "
+        "edit files or invoke tools."
     ),
     "architecture_evaluator": (
         "You are an independent architecture evaluator. Use only supplied frozen knowledge "
-        "and diff excerpts. Every finding must cite a knowledge revision and a changed "
-        "location. Return only schema-valid JSON. Do not edit files or invoke tools."
+        "and diff excerpts. Frozen validation evidence is background only: passing tests or "
+        "builds do not prove architecture compliance. Every finding must cite a frozen "
+        "knowledge revision and exactly one changed location. changed_location must start "
+        "with one path copied verbatim from changed_files and may only add ':' plus a "
+        "location inside that same file. Never combine two file paths in one finding; emit "
+        "separate findings instead. Return only schema-valid JSON. Do not edit files or "
+        "invoke tools."
     ),
     "archiver": (
         "You are the archiver role. Summarize the supplied redacted packet and produce at "
@@ -115,12 +137,14 @@ class StructuredRoleRunner:
             repaired = False
             try:
                 output = self._parse(raw, output_model)
-            except (json.JSONDecodeError, ValidationError, ValueError):
+            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                 repaired = True
+                validation_detail = sanitize_for_codex(str(exc), max_chars=2000)
                 repair_prompt = (
                     "Your previous response did not validate. Return the same intended "
                     "result again as one JSON object matching the supplied output schema. "
-                    "Do not add Markdown fences or commentary."
+                    "Do not add Markdown fences or commentary. Validation error:\n"
+                    f"{validation_detail}"
                 )
                 second = client.run(repair_prompt, output_schema=schema)
                 raw = str(getattr(second, "final_response", "") or "")

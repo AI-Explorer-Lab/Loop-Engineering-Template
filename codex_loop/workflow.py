@@ -15,7 +15,14 @@ from .context import (
     ContextSnapshot,
     merge_context_snapshots,
 )
-from .evaluation import EvaluationCoordinator
+from .evaluation import (
+    EvaluationCoordinator,
+    build_legacy_aggregate,
+    build_non_passing_aggregate,
+    verify_aggregate_binding,
+    verify_control_aggregate,
+    verify_evaluation_artifact_binding,
+)
 from .models import (
     InfrastructureError,
     PromptKind,
@@ -33,10 +40,12 @@ from .state import (
     QueueStore,
     StateStore,
     has_only_plan_artifacts,
+    redact_sensitive_data,
     redact_sensitive_text,
     _atomic_write_json,
 )
 from .validation_runner import ValidationRunner
+from .validation_evidence import ValidationEvidenceSnapshot
 from .validation_profile import ValidationProfile
 from .workspace import WorkspaceInfo, WorkspaceManager
 
@@ -110,7 +119,9 @@ class OrchestrationWorkflow:
         audit: AuditRecorder | None = None
         try:
             self._assert_no_other_unfinished_task()
-            if self.store.run_dir(task.task_id).exists() and not has_only_plan_artifacts(
+            if self.store.run_dir(
+                task.task_id
+            ).exists() and not has_only_plan_artifacts(
                 self.store.run_dir(task.task_id)
             ):
                 raise InfrastructureError(
@@ -151,6 +162,10 @@ class OrchestrationWorkflow:
                         task.task_id, str(queue_control.get("action", ""))
                     )
             manifest = workspace.manifest()
+            manifest["validation_evidence"] = {
+                "required": True,
+                "schema_version": 1,
+            }
             if task.queue_id is not None:
                 manifest["queue"] = {
                     "queue_id": task.queue_id,
@@ -163,11 +178,11 @@ class OrchestrationWorkflow:
                 "run.created",
                 {"task_id": task.task_id, "rerun_of": task.rerun_of},
             )
-            plan_confirmation = self.store.run_dir(task.task_id) / "plan/confirmation.json"
+            plan_confirmation = (
+                self.store.run_dir(task.task_id) / "plan/confirmation.json"
+            )
             if plan_confirmation.is_file():
-                confirmation = json.loads(
-                    plan_confirmation.read_text(encoding="utf-8")
-                )
+                confirmation = json.loads(plan_confirmation.read_text(encoding="utf-8"))
                 audit.append(
                     "plan.confirmed",
                     {
@@ -176,9 +191,7 @@ class OrchestrationWorkflow:
                         "confirmed_plan_sha256": confirmation.get(
                             "confirmed_plan_sha256"
                         ),
-                        "manual_edit_count": confirmation.get(
-                            "manual_edit_count", 0
-                        ),
+                        "manual_edit_count": confirmation.get("manual_edit_count", 0),
                     },
                 )
             audit.append(
@@ -248,9 +261,10 @@ class OrchestrationWorkflow:
             task = self.store.load_task(task_id)
             state = self.store.load_state(task_id)
             if state.schema_version == 0:
-                if state.status.is_final and (
-                    self.store.run_dir(task_id) / "result.json"
-                ).is_file():
+                if (
+                    state.status.is_final
+                    and (self.store.run_dir(task_id) / "result.json").is_file()
+                ):
                     return self.store.load_result(task_id)
                 raise InfrastructureError(
                     "legacy_v0 runs are read-only and cannot be resumed"
@@ -258,9 +272,15 @@ class OrchestrationWorkflow:
             result_path = self.store.run_dir(task_id) / "result.json"
 
             manifest = self.store.load_manifest(task_id)
-            workspace = WorkspaceInfo.from_manifest(
-                self.control_repo_root, manifest
-            )
+            workspace = WorkspaceInfo.from_manifest(self.control_repo_root, manifest)
+            if (
+                workspace.task_id != state.task_id
+                or workspace.base_commit != state.base_commit
+                or workspace.task_branch != state.task_branch
+            ):
+                raise InfrastructureError(
+                    "run state conflicts with the immutable workspace manifest"
+                )
             self.workspace_manager.verify(workspace)
             # Absolute paths in older state files may have been redacted because
             # the standard PWD environment variable was mistaken for a password.
@@ -286,12 +306,21 @@ class OrchestrationWorkflow:
                 self.store.clear_control(task_id)
                 self.store.save_state(state)
                 audit.append("run.resumed", {"checkpoint": state.phase.value})
-            if state.phase is not RunPhase.CODEX_TURN and state.last_diff_sha256:
+            if (
+                state.phase
+                not in {
+                    RunPhase.CODEX_TURN,
+                    RunPhase.VALIDATING,
+                }
+                and state.last_diff_sha256
+            ):
                 if audit.current_diff_sha256() != state.last_diff_sha256:
                     raise InfrastructureError(
                         "Task worktree changed outside the saved workflow checkpoint"
                     )
             if state.status.is_final:
+                if state.status in {RunStatus.SUCCESS, RunStatus.MANUAL_REVIEW}:
+                    self._verify_final_validation_artifacts(state, audit)
                 required_artifacts = (
                     result_path,
                     self.store.run_dir(task_id) / "report.md",
@@ -299,7 +328,17 @@ class OrchestrationWorkflow:
                     self.store.run_dir(task_id) / "changes/final.diff",
                 )
                 if all(path.is_file() for path in required_artifacts):
-                    return self.store.load_result(task_id)
+                    saved_result = self.store.load_result(task_id)
+                    saved_projection = saved_result.to_dict()
+                    saved_result.attach_evaluation_artifacts(
+                        self.store.run_dir(task_id)
+                    )
+                    if (
+                        saved_result.to_dict() == saved_projection
+                        and saved_result.status is state.status
+                        and saved_result.final_diff_sha256 == state.last_diff_sha256
+                    ):
+                        return saved_result
                 return self._persist_final(task, state, audit)
 
             validator = self._make_validator(
@@ -421,7 +460,9 @@ class OrchestrationWorkflow:
             prompt = self.prompt_renderer.initial_prompt(task, state)
         elif prompt_kind is PromptKind.REPAIR:
             if not state.rounds or state.cycle_failure_count not in {1, 2}:
-                raise InfrastructureError("No failed validation round is available to repair")
+                raise InfrastructureError(
+                    "No failed validation round is available to repair"
+                )
             prompt = self.prompt_renderer.repair_prompt(
                 task,
                 state,
@@ -564,10 +605,30 @@ class OrchestrationWorkflow:
     def _run_validation(
         self, state: RunState, validator: Any, audit: AuditRecorder
     ) -> None:
-        state.phase = RunPhase.VALIDATING
-        self.store.save_state(state)
-        round_number = len(state.rounds) + 1
-        audit.append("validation.started", {}, round_number=round_number)
+        if state.active_validation_round is None:
+            round_number = len(state.rounds) + 1
+            state.phase = RunPhase.VALIDATING
+            state.active_validation_round = round_number
+            state.validation_start_diff_sha256 = audit.current_diff_sha256()
+            state.last_diff_sha256 = state.validation_start_diff_sha256
+            self.store.save_state(state)
+        else:
+            round_number = state.active_validation_round
+            if round_number != len(state.rounds) + 1:
+                raise InfrastructureError(
+                    "active validation round is not the next durable round"
+                )
+            current_diff_sha256 = audit.current_diff_sha256()
+            if current_diff_sha256 != state.validation_start_diff_sha256:
+                raise InfrastructureError(
+                    "Task worktree changed after validation started"
+                )
+        if not audit.has_event("validation.started", round_number=round_number):
+            audit.append(
+                "validation.started",
+                {"diff_sha256": state.validation_start_diff_sha256},
+                round_number=round_number,
+            )
 
         validation_round: ValidationRound = validator.validate(round_number)
         state.protected_test_paths = self._validator_protected_tests(
@@ -594,9 +655,58 @@ class OrchestrationWorkflow:
                 round_number=round_number,
                 redacted=True,
             )
-        self.store.save_round(state.task_id, validation_round)
+        command_infrastructure_error = next(
+            (
+                redact_sensitive_text(str(result.infrastructure_error))
+                for result in validation_round.command_results
+                if result.infrastructure_error
+            ),
+            None,
+        )
+        if command_infrastructure_error:
+            validation_round.passed = False
+            if not validation_round.infrastructure_error:
+                validation_round.infrastructure_error = command_infrastructure_error
+            validation_round.failure_summary = validation_round.infrastructure_error
+        final_diff_sha256 = audit.current_diff_sha256()
+        if final_diff_sha256 != state.validation_start_diff_sha256:
+            validation_round.passed = False
+            validation_round.infrastructure_error = (
+                "Task worktree changed while fixed validation commands were running"
+            )
+            validation_round.failure_summary = validation_round.infrastructure_error
+        state.last_diff_sha256 = final_diff_sha256
+        evidence = ValidationEvidenceSnapshot.from_round(
+            validation_round,
+            task_id=state.task_id,
+            base_commit=state.base_commit,
+            final_diff_sha256=final_diff_sha256,
+            control_repo_root=self.control_repo_root,
+            run_dir=audit.run_dir,
+        )
+        round_path = self.store.save_round(state.task_id, validation_round)
+        evidence_path = self.store.save_validation_evidence(state.task_id, evidence)
+        audit.append(
+            "validation.evidence.frozen",
+            {
+                "status": evidence.status,
+                "evidence_ids": [item.evidence_id for item in evidence.commands],
+                "validation_round_path": round_path.relative_to(
+                    audit.run_dir
+                ).as_posix(),
+                "validation_evidence_path": evidence_path.relative_to(
+                    audit.run_dir
+                ).as_posix(),
+                "validation_evidence_sha256": evidence.snapshot_sha256,
+                "diff_sha256": final_diff_sha256,
+            },
+            round_number=round_number,
+        )
+        if evidence.status in {"fail", "infra_error"}:
+            self._project_non_passing_validation(state, evidence)
         state.add_round(validation_round)
-        state.last_diff_sha256 = audit.current_diff_sha256()
+        state.active_validation_round = None
+        state.validation_start_diff_sha256 = ""
         self.store.save_state(state)
         audit.append(
             "validation.completed",
@@ -604,13 +714,20 @@ class OrchestrationWorkflow:
                 "passed": validation_round.passed,
                 "failure_summary": validation_round.failure_summary,
                 "diff_sha256": state.last_diff_sha256,
+                "validation_evidence_path": evidence_path.relative_to(
+                    audit.run_dir
+                ).as_posix(),
+                "validation_evidence_sha256": evidence.snapshot_sha256,
             },
             round_number=round_number,
             redacted=True,
         )
-
-        if validation_round.infrastructure_error:
-            raise InfrastructureError(validation_round.infrastructure_error)
+        if evidence.status == "infra_error":
+            raise InfrastructureError(
+                validation_round.infrastructure_error
+                or evidence.round_infrastructure_error
+                or "Fixed validation reported an infrastructure error"
+            )
         if validation_round.passed:
             if self.evaluation_coordinator is None:
                 state.mark_success(self._safe_git_summary(Path(state.repo_root)))
@@ -630,17 +747,143 @@ class OrchestrationWorkflow:
             )
         self.store.save_state(state)
 
-    def _recover_round_checkpoint(
-        self, state: RunState, audit: AuditRecorder
-    ) -> None:
+    def _recover_round_checkpoint(self, state: RunState, audit: AuditRecorder) -> None:
         """Finish a validation projection already saved before a crash."""
 
-        if not state.rounds:
+        required = self._validation_evidence_required(state.task_id)
+        active_round = state.active_validation_round
+        if active_round is not None:
+            round_path = self.store.round_path(state.task_id, active_round)
+            evidence_path = self.store.validation_evidence_path(
+                state.task_id, active_round
+            )
+            has_round = round_path.is_file()
+            has_evidence = evidence_path.is_file()
+            if not has_round and not has_evidence:
+                return
+            if not has_round or not has_evidence:
+                raise InfrastructureError(
+                    "validation checkpoint is incomplete: round and evidence must coexist"
+                )
+            latest = self.store.load_round(state.task_id, active_round)
+            evidence = self.store.load_validation_evidence(state.task_id, active_round)
+            if audit.current_diff_sha256() != evidence.final_diff_sha256:
+                raise InfrastructureError(
+                    "Task worktree changed after validation evidence was frozen"
+                )
+            self._verify_validation_evidence(
+                state,
+                audit,
+                latest,
+                evidence,
+                expected_diff_sha256=evidence.final_diff_sha256,
+            )
+            if (
+                evidence.final_diff_sha256 != state.validation_start_diff_sha256
+                and evidence.status != "infra_error"
+            ):
+                raise InfrastructureError(
+                    "validation Diff changed without an infrastructure-error snapshot"
+                )
+            if evidence.status in {"fail", "infra_error"}:
+                self._project_non_passing_validation(state, evidence)
+            matching = [
+                item for item in state.rounds if item.round_number == active_round
+            ]
+            round_added = False
+            if matching:
+                if redact_sensitive_data(
+                    matching[0].to_dict(include_output=False)
+                ) != redact_sensitive_data(latest.to_dict(include_output=False)):
+                    raise InfrastructureError(
+                        "state validation round conflicts with frozen round artifact"
+                    )
+            else:
+                state.add_round(latest)
+                round_added = True
+            if evidence.status == "infra_error":
+                if round_added and not latest.infrastructure_error:
+                    state.failure_count = max(0, state.failure_count - 1)
+                    state.cycle_failure_count = max(0, state.cycle_failure_count - 1)
+                infrastructure_error = (
+                    evidence.round_infrastructure_error
+                    or next(
+                        (
+                            item.infrastructure_error
+                            for item in evidence.commands
+                            if item.infrastructure_error
+                        ),
+                        None,
+                    )
+                    or "Fixed validation reported an infrastructure error"
+                )
+                state.mark_infrastructure_error(infrastructure_error)
+            state.active_validation_round = None
+            state.validation_start_diff_sha256 = ""
+            state.last_diff_sha256 = evidence.final_diff_sha256
+            self.store.save_state(state)
+        elif not state.rounds:
             return
-        latest = state.rounds[-1]
+        else:
+            latest = state.rounds[-1]
+            round_path = self.store.round_path(state.task_id, latest.round_number)
+            evidence_path = self.store.validation_evidence_path(
+                state.task_id, latest.round_number
+            )
+            if required:
+                if not round_path.is_file() or not evidence_path.is_file():
+                    raise InfrastructureError(
+                        "required validation evidence checkpoint is missing"
+                    )
+                persisted = self.store.load_round(state.task_id, latest.round_number)
+                if redact_sensitive_data(
+                    persisted.to_dict(include_output=False)
+                ) != redact_sensitive_data(latest.to_dict(include_output=False)):
+                    raise InfrastructureError(
+                        "state validation round conflicts with frozen round artifact"
+                    )
+                evidence = self.store.load_validation_evidence(
+                    state.task_id, latest.round_number
+                )
+                self._verify_validation_evidence(
+                    state,
+                    audit,
+                    latest,
+                    evidence,
+                    expected_diff_sha256=evidence.final_diff_sha256,
+                )
+            elif not audit.has_event(
+                "validation.started", round_number=latest.round_number
+            ):
+                return
+
         round_number = latest.round_number
-        if not audit.has_event("validation.started", round_number=round_number):
-            return
+        evidence = (
+            self.store.load_validation_evidence(state.task_id, round_number)
+            if self.store.validation_evidence_path(
+                state.task_id, round_number
+            ).is_file()
+            else None
+        )
+        if evidence is not None and not audit.has_event(
+            "validation.evidence.frozen", round_number=round_number
+        ):
+            audit.append(
+                "validation.evidence.frozen",
+                {
+                    "status": evidence.status,
+                    "evidence_ids": [item.evidence_id for item in evidence.commands],
+                    "validation_evidence_path": (
+                        self.store.validation_evidence_path(state.task_id, round_number)
+                        .relative_to(audit.run_dir)
+                        .as_posix()
+                    ),
+                    "validation_evidence_sha256": evidence.snapshot_sha256,
+                    "diff_sha256": evidence.final_diff_sha256,
+                    "recovered": True,
+                },
+                round_number=round_number,
+            )
         if not audit.has_event("validation.completed", round_number=round_number):
             audit.append(
                 "validation.completed",
@@ -648,11 +891,27 @@ class OrchestrationWorkflow:
                     "passed": latest.passed,
                     "failure_summary": latest.failure_summary,
                     "diff_sha256": state.last_diff_sha256,
+                    "validation_evidence_path": (
+                        None
+                        if evidence is None
+                        else self.store.validation_evidence_path(
+                            state.task_id, round_number
+                        )
+                        .relative_to(audit.run_dir)
+                        .as_posix()
+                    ),
+                    "validation_evidence_sha256": (
+                        None if evidence is None else evidence.snapshot_sha256
+                    ),
                     "recovered": True,
                 },
                 round_number=round_number,
                 redacted=True,
             )
+        if evidence is not None and evidence.status in {"fail", "infra_error"}:
+            self._project_non_passing_validation(state, evidence)
+        if state.status is RunStatus.INFRASTRUCTURE_ERROR:
+            return
         if latest.passed and state.phase is RunPhase.VALIDATING:
             if self.evaluation_coordinator is None:
                 state.mark_success(self._safe_git_summary(Path(state.repo_root)))
@@ -702,26 +961,139 @@ class OrchestrationWorkflow:
         round_number = state.rounds[-1].round_number
         state.phase = RunPhase.EVALUATING
         self.store.save_state(state)
-        aggregate_path = self.store.run_dir(task.task_id) / "evaluations" / "aggregate.json"
+        run_dir = self.store.run_dir(task.task_id)
+        evidence_path = self.store.validation_evidence_path(task.task_id, round_number)
+        evidence_relative_path = evidence_path.relative_to(run_dir).as_posix()
+        if not evidence_path.is_file():
+            if self._validation_evidence_required(task.task_id):
+                raise InfrastructureError(
+                    "required validation evidence is missing before evaluation"
+                )
+            legacy = ValidationEvidenceSnapshot.legacy_unavailable(
+                task_id=task.task_id,
+                validation_round=round_number,
+                base_commit=state.base_commit,
+                final_diff_sha256=audit.current_diff_sha256(),
+            )
+            self.store.save_validation_evidence(task.task_id, legacy)
+            self._finish_legacy_evaluation(
+                state,
+                audit,
+                legacy,
+                evidence_relative_path=evidence_relative_path,
+            )
+            return
+
+        evidence = self.store.load_validation_evidence(task.task_id, round_number)
+        if evidence.status == "legacy_evidence_unavailable":
+            if self._validation_evidence_required(task.task_id):
+                raise InfrastructureError(
+                    "required validation evidence cannot be a legacy marker"
+                )
+            self._finish_legacy_evaluation(
+                state,
+                audit,
+                evidence,
+                evidence_relative_path=evidence_relative_path,
+            )
+            return
+        self._verify_validation_evidence(
+            state,
+            audit,
+            state.rounds[-1],
+            evidence,
+            expected_diff_sha256=audit.current_diff_sha256(),
+        )
+        if evidence.status != "pass":
+            raise InfrastructureError(
+                "evaluation cannot consume non-passing validation evidence"
+            )
+        context = self._assemble_evaluation_context(task, state, audit)
+        changed_files = audit.current_changed_files()
+        diff_text = audit.current_diff_text()
+        binding, _normalized_files = EvaluationCoordinator.input_binding(
+            task=task,
+            context=context,
+            changed_files=changed_files,
+            diff_text=diff_text,
+            validation_evidence=evidence,
+        )
+        round_root = run_dir / "evaluations" / f"round-{round_number:02d}"
+        aggregate_path = round_root / "aggregate.json"
         if aggregate_path.is_file():
-            aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
-            if int(aggregate.get("validation_round", 0)) != round_number:
-                aggregate = {}
+            value = json.loads(aggregate_path.read_text(encoding="utf-8"))
+            if not isinstance(value, Mapping):
+                raise InfrastructureError(
+                    "evaluation aggregate must contain one object"
+                )
+            aggregate = dict(value)
+            verify_aggregate_binding(
+                aggregate,
+                binding=binding,
+                evidence_path=evidence_relative_path,
+                evidence_ids=[item.evidence_id for item in evidence.commands],
+            )
         else:
-            aggregate = {}
-        if not aggregate:
-            context = self._assemble_evaluation_context(task, state, audit)
-            self.evaluation_coordinator.event_sink = lambda event_type, payload: audit.append(
-                event_type, payload, source="evaluator", round_number=round_number
+            self.evaluation_coordinator.event_sink = lambda event_type, payload: (
+                audit.append(
+                    event_type,
+                    payload,
+                    source="evaluator",
+                    round_number=round_number,
+                )
             )
             aggregate = self.evaluation_coordinator.evaluate(
                 task=task,
                 context=context,
-                changed_files=audit.current_changed_files(),
-                diff_text=audit.current_diff_text(),
-                validation_round=round_number,
-                artifact_root=self.store.run_dir(task.task_id) / "evaluations",
+                changed_files=changed_files,
+                diff_text=diff_text,
+                validation_evidence=evidence,
+                validation_evidence_path=evidence_relative_path,
+                artifact_root=run_dir / "evaluations",
             )
+            verify_aggregate_binding(
+                aggregate,
+                binding=binding,
+                evidence_path=evidence_relative_path,
+                evidence_ids=[item.evidence_id for item in evidence.commands],
+            )
+        role_artifacts: dict[str, Mapping[str, Any]] = {}
+        for filename in ("spec.json", "architecture.json"):
+            artifact_path = round_root / filename
+            if not artifact_path.is_file():
+                raise InfrastructureError(
+                    f"evaluation role artifact is missing: {filename}"
+                )
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            if not isinstance(artifact, Mapping):
+                raise InfrastructureError(
+                    f"evaluation role artifact must be an object: {filename}"
+                )
+            verify_evaluation_artifact_binding(
+                artifact,
+                binding=binding,
+                evidence_path=evidence_relative_path,
+            )
+            role_artifacts[filename] = artifact
+            _atomic_write_json(
+                run_dir / "evaluations" / filename,
+                artifact,
+            )
+        EvaluationCoordinator.verify_frozen_evaluation(
+            task=task,
+            context=context,
+            changed_files=changed_files,
+            validation_evidence=evidence,
+            validation_evidence_path=evidence_relative_path,
+            binding=binding,
+            spec_artifact=role_artifacts["spec.json"],
+            architecture_artifact=role_artifacts["architecture.json"],
+            aggregate=aggregate,
+        )
+        _atomic_write_json(
+            run_dir / "evaluations" / "aggregate.json",
+            aggregate,
+        )
         if bool(aggregate.get("requires_repair")):
             summary = json.dumps(
                 aggregate.get("blocking_findings", []),
@@ -745,6 +1117,9 @@ class OrchestrationWorkflow:
                     },
                     round_number=round_number,
                 )
+        elif bool(aggregate.get("requires_human")):
+            state.pending_evaluation_summary = ""
+            state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
         else:
             state.pending_evaluation_summary = ""
             state.mark_success(self._safe_git_summary(Path(state.repo_root)))
@@ -872,8 +1247,8 @@ class OrchestrationWorkflow:
                 event_sink=lambda notification: audit.record_codex_notification(
                     state.turn_count, notification
                 ),
-                permission_denial_sink=lambda method, params: audit.record_permission_denial(
-                    state.turn_count, method, params
+                permission_denial_sink=lambda method, params: (
+                    audit.record_permission_denial(state.turn_count, method, params)
                 ),
             )
         return self.client_factory(workspace.worktree)
@@ -915,9 +1290,21 @@ class OrchestrationWorkflow:
     ) -> RunResult:
         if not state.status.is_final:
             raise InfrastructureError("Cannot write a final report for a running task")
+        require_final_integrity = state.status in {
+            RunStatus.SUCCESS,
+            RunStatus.MANUAL_REVIEW,
+        }
+        verified_diff_sha256 = state.last_diff_sha256
+        if require_final_integrity:
+            self._verify_final_validation_artifacts(state, audit)
         changes = audit.capture_final_changes()
         final_diff = changes.get("final_diff", {})
-        state.last_diff_sha256 = str(final_diff.get("raw_sha256", ""))
+        captured_diff_sha256 = str(final_diff.get("raw_sha256", ""))
+        if require_final_integrity and captured_diff_sha256 != verified_diff_sha256:
+            raise InfrastructureError(
+                "Task worktree changed while final artifacts were being captured"
+            )
+        state.last_diff_sha256 = captured_diff_sha256
         cumulative_diff = changes.get("cumulative_diff", {})
         state.diff_redaction_count = max(
             int(final_diff.get("redaction_count", 0)),
@@ -955,7 +1342,9 @@ class OrchestrationWorkflow:
         review = (
             self.store.load_latest_review(task.task_id)
             if task.queue_id is not None
-            else (self.store.load_review(task.task_id) if review_path.is_file() else None)
+            else (
+                self.store.load_review(task.task_id) if review_path.is_file() else None
+            )
         )
         result, report = self.report_builder.build(
             task,
@@ -965,6 +1354,7 @@ class OrchestrationWorkflow:
             review=review,
             denied_event_count=audit.denied_event_count(),
         )
+        result.attach_evaluation_artifacts(self.store.run_dir(task.task_id))
         self.store.save_result(result)
         self.store.save_report(task.task_id, report)
         return result
@@ -980,18 +1370,16 @@ class OrchestrationWorkflow:
             queue_task=state.queue_id is not None,
         )
 
-    def _assert_no_other_unfinished_task(
-        self, *, excluding: str | None = None
-    ) -> None:
+    def _assert_no_other_unfinished_task(self, *, excluding: str | None = None) -> None:
         unfinished = self.store.unfinished_task_ids(excluding=excluding)
         if unfinished:
             raise ActiveRunError(
                 "an unfinished task must be resumed or reviewed before starting "
                 f"another task (task_id={', '.join(unfinished)})"
             )
-        unfinished_queues = QueueStore(
-            self.control_repo_root
-        ).unfinished_queue_ids(excluding=self.store.queue_id)
+        unfinished_queues = QueueStore(self.control_repo_root).unfinished_queue_ids(
+            excluding=self.store.queue_id
+        )
         if unfinished_queues:
             raise ActiveRunError(
                 "an unfinished task queue must be resumed or reviewed before "
@@ -1018,6 +1406,285 @@ class OrchestrationWorkflow:
             return sorted({str(path) for path in values})
         return sorted({str(path) for path in protected})
 
+    def _validation_evidence_required(self, task_id: str) -> bool:
+        manifest = self.store.load_manifest(task_id)
+        if "validation_evidence" not in manifest:
+            return False
+        value = manifest.get("validation_evidence")
+        if not isinstance(value, Mapping):
+            raise InfrastructureError(
+                "manifest validation_evidence policy must be an object"
+            )
+        if value.get("required") is not True or value.get("schema_version") != 1:
+            raise InfrastructureError(
+                "manifest validation_evidence policy is unsupported"
+            )
+        return True
+
+    def _verify_validation_evidence(
+        self,
+        state: RunState,
+        audit: AuditRecorder,
+        validation_round: ValidationRound,
+        evidence: ValidationEvidenceSnapshot,
+        *,
+        expected_diff_sha256: str,
+    ) -> None:
+        evidence.verify_binding(
+            task_id=state.task_id,
+            validation_round=validation_round.round_number,
+            base_commit=state.base_commit,
+            final_diff_sha256=expected_diff_sha256,
+        )
+        evidence.verify_round(
+            validation_round,
+            control_repo_root=self.control_repo_root,
+            run_dir=audit.run_dir,
+        )
+        evidence.verify_logs(audit.run_dir)
+
+    def _finish_legacy_evaluation(
+        self,
+        state: RunState,
+        audit: AuditRecorder,
+        evidence: ValidationEvidenceSnapshot,
+        *,
+        evidence_relative_path: str,
+    ) -> None:
+        evidence.verify_binding(
+            task_id=state.task_id,
+            validation_round=state.rounds[-1].round_number,
+            base_commit=state.base_commit,
+            final_diff_sha256=audit.current_diff_sha256(),
+        )
+        evaluation_root = self.store.run_dir(state.task_id) / "evaluations"
+        round_root = evaluation_root / f"round-{evidence.validation_round:02d}"
+        aggregate_path = round_root / "aggregate.json"
+        legacy_projection_completed = audit.has_event(
+            "evaluation.legacy_evidence_unavailable",
+            round_number=evidence.validation_round,
+        )
+        if legacy_projection_completed:
+            if not aggregate_path.is_file():
+                raise InfrastructureError("legacy aggregate checkpoint is missing")
+            aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+            if not isinstance(aggregate, Mapping):
+                raise InfrastructureError("legacy aggregate must contain one object")
+            verify_control_aggregate(
+                aggregate,
+                evidence=evidence,
+                evidence_path=evidence_relative_path,
+            )
+        else:
+            # A pre-evidence evaluator may already have written an unbound aggregate
+            # at this path. It is historical input, not a reusable checkpoint.
+            aggregate = build_legacy_aggregate(
+                evidence,
+                evidence_path=evidence_relative_path,
+            )
+            _atomic_write_json(aggregate_path, aggregate)
+        _atomic_write_json(evaluation_root / "aggregate.json", aggregate)
+        for filename in ("spec.json", "architecture.json"):
+            (evaluation_root / filename).unlink(missing_ok=True)
+        if not legacy_projection_completed:
+            audit.append(
+                "evaluation.legacy_evidence_unavailable",
+                {
+                    "validation_round": evidence.validation_round,
+                    "validation_evidence_path": evidence_relative_path,
+                    "validation_evidence_sha256": evidence.snapshot_sha256,
+                },
+                source="evaluator",
+                round_number=evidence.validation_round,
+            )
+        state.pending_evaluation_summary = ""
+        state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
+        self.store.save_state(state)
+
+    def _project_non_passing_validation(
+        self,
+        state: RunState,
+        evidence: ValidationEvidenceSnapshot,
+    ) -> None:
+        run_dir = self.store.run_dir(state.task_id)
+        evidence_path = (
+            self.store.validation_evidence_path(
+                state.task_id, evidence.validation_round
+            )
+            .relative_to(run_dir)
+            .as_posix()
+        )
+        evaluation_root = run_dir / "evaluations"
+        round_root = evaluation_root / f"round-{evidence.validation_round:02d}"
+        aggregate_path = round_root / "aggregate.json"
+        if aggregate_path.is_file():
+            aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+            if not isinstance(aggregate, Mapping):
+                raise InfrastructureError(
+                    "non-passing validation aggregate must contain one object"
+                )
+            verify_control_aggregate(
+                aggregate,
+                evidence=evidence,
+                evidence_path=evidence_path,
+            )
+        else:
+            aggregate = build_non_passing_aggregate(
+                evidence,
+                evidence_path=evidence_path,
+            )
+            _atomic_write_json(aggregate_path, aggregate)
+        _atomic_write_json(evaluation_root / "aggregate.json", aggregate)
+        for filename in ("spec.json", "architecture.json"):
+            (evaluation_root / filename).unlink(missing_ok=True)
+
+    def _verify_final_validation_artifacts(
+        self,
+        state: RunState,
+        audit: AuditRecorder,
+    ) -> None:
+        if not state.rounds:
+            if self._validation_evidence_required(state.task_id):
+                raise InfrastructureError("final run has no required validation round")
+            return
+        latest = state.rounds[-1]
+        path = self.store.validation_evidence_path(state.task_id, latest.round_number)
+        if not path.is_file():
+            if self._validation_evidence_required(state.task_id):
+                raise InfrastructureError(
+                    "final run is missing required validation evidence"
+                )
+            return
+        evidence = self.store.load_validation_evidence(
+            state.task_id, latest.round_number
+        )
+        run_dir = self.store.run_dir(state.task_id)
+        evidence_path = (
+            self.store.validation_evidence_path(state.task_id, latest.round_number)
+            .relative_to(run_dir)
+            .as_posix()
+        )
+        round_root = run_dir / "evaluations" / f"round-{latest.round_number:02d}"
+        aggregate_path = round_root / "aggregate.json"
+        if evidence.status == "legacy_evidence_unavailable":
+            if self._validation_evidence_required(state.task_id):
+                raise InfrastructureError(
+                    "required validation evidence cannot be a legacy marker"
+                )
+            evidence.verify_binding(
+                task_id=state.task_id,
+                validation_round=latest.round_number,
+                base_commit=state.base_commit,
+                final_diff_sha256=state.last_diff_sha256,
+            )
+            aggregate = self._load_final_aggregate_with_alias(
+                run_dir,
+                aggregate_path,
+            )
+            verify_control_aggregate(
+                aggregate,
+                evidence=evidence,
+                evidence_path=evidence_path,
+            )
+            return
+        self._verify_validation_evidence(
+            state,
+            audit,
+            latest,
+            evidence,
+            expected_diff_sha256=state.last_diff_sha256,
+        )
+        if evidence.status != "pass":
+            aggregate = self._load_final_aggregate_with_alias(
+                run_dir,
+                aggregate_path,
+            )
+            verify_control_aggregate(
+                aggregate,
+                evidence=evidence,
+                evidence_path=evidence_path,
+            )
+            return
+        evaluation_context_path = run_dir / "context" / "evaluation.json"
+        if not aggregate_path.is_file():
+            if (
+                self.evaluation_coordinator is not None
+                or evaluation_context_path.is_file()
+            ):
+                raise InfrastructureError(
+                    "final evaluated run is missing its round aggregate"
+                )
+            return
+        context = self._load_context(evaluation_context_path)
+        if context is None:
+            raise InfrastructureError(
+                "final evaluation aggregate has no frozen evaluation context"
+            )
+        binding, _normalized = EvaluationCoordinator.input_binding(
+            task=self.store.load_task(state.task_id),
+            context=context,
+            changed_files=audit.current_changed_files(),
+            diff_text=audit.current_diff_text(),
+            validation_evidence=evidence,
+        )
+        aggregate = self._load_final_aggregate_with_alias(
+            run_dir,
+            aggregate_path,
+        )
+        verify_aggregate_binding(
+            aggregate,
+            binding=binding,
+            evidence_path=evidence_path,
+            evidence_ids=[item.evidence_id for item in evidence.commands],
+        )
+        role_artifacts: dict[str, Mapping[str, Any]] = {}
+        for filename in ("spec.json", "architecture.json"):
+            path = round_root / filename
+            if not path.is_file():
+                raise InfrastructureError(f"final evaluated run is missing {filename}")
+            artifact = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(artifact, Mapping):
+                raise InfrastructureError(
+                    f"final evaluation artifact must be an object: {filename}"
+                )
+            verify_evaluation_artifact_binding(
+                artifact,
+                binding=binding,
+                evidence_path=evidence_path,
+            )
+            role_artifacts[filename] = artifact
+        EvaluationCoordinator.verify_frozen_evaluation(
+            task=self.store.load_task(state.task_id),
+            context=context,
+            changed_files=audit.current_changed_files(),
+            validation_evidence=evidence,
+            validation_evidence_path=evidence_path,
+            binding=binding,
+            spec_artifact=role_artifacts["spec.json"],
+            architecture_artifact=role_artifacts["architecture.json"],
+            aggregate=aggregate,
+        )
+
+    @staticmethod
+    def _load_final_aggregate_with_alias(
+        run_dir: Path,
+        aggregate_path: Path,
+    ) -> Mapping[str, Any]:
+        if not aggregate_path.is_file():
+            raise InfrastructureError("final run is missing its round aggregate")
+        aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+        if not isinstance(aggregate, Mapping):
+            raise InfrastructureError("evaluation aggregate must contain one object")
+        alias_path = run_dir / "evaluations" / "aggregate.json"
+        if not alias_path.is_file():
+            raise InfrastructureError("final run is missing its aggregate alias")
+        alias = json.loads(alias_path.read_text(encoding="utf-8"))
+        if not isinstance(alias, Mapping) or dict(alias) != dict(aggregate):
+            raise InfrastructureError(
+                "final evaluation aggregate alias is stale or changed"
+            )
+        return aggregate
+
     def _safe_git_summary(self, root: Path) -> str:
         try:
             status = self._run_git(root, "status", "--short", "--untracked-files=all")
@@ -1027,7 +1694,8 @@ class OrchestrationWorkflow:
                 [
                     "git status --short:\n" + (status.strip() or "（工作区干净）"),
                     "git diff --stat:\n" + (unstaged.strip() or "（无未暂存差异）"),
-                    "git diff --cached --stat:\n" + (staged.strip() or "（无已暂存差异）"),
+                    "git diff --cached --stat:\n"
+                    + (staged.strip() or "（无已暂存差异）"),
                 ]
             )
         except InfrastructureError as exc:

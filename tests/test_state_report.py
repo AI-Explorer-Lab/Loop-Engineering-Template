@@ -29,6 +29,7 @@ from codex_loop.state import (
     StateStore,
     redact_sensitive_text,
 )
+from codex_loop.validation_evidence import ValidationEvidenceSnapshot
 
 
 class StateAndReportTests(unittest.TestCase):
@@ -138,7 +139,9 @@ class StateAndReportTests(unittest.TestCase):
             workspace_path,
         )
         self.assertEqual(
-            redact_sensitive_text("database-secret", environ={"DB_PWD": "database-secret"}),
+            redact_sensitive_text(
+                "database-secret", environ={"DB_PWD": "database-secret"}
+            ),
             "[REDACTED]",
         )
 
@@ -149,9 +152,7 @@ class StateAndReportTests(unittest.TestCase):
             baseline_git_status="clean",
             baseline_test_hashes={"backend/tests/test_x.py": "abc123"},
         )
-        self.assertEqual(
-            state.protected_test_paths, ["backend/tests/test_x.py"]
-        )
+        self.assertEqual(state.protected_test_paths, ["backend/tests/test_x.py"])
         state.thread_id = "thread-123"
         state.turn_count = 1
         command = self._command()
@@ -193,6 +194,130 @@ class StateAndReportTests(unittest.TestCase):
         self.assertNotIn('"stderr"', state_text)
         self.assertTrue(command.log_sha256)
         self.assertEqual(list(run_dir.rglob("*.tmp")), [])
+
+    def test_state_round_trips_active_validation_checkpoint(self) -> None:
+        task = self._task("active-validation")
+        state = self.store.initialize_run(task)
+        state.active_validation_round = 2
+        state.validation_start_diff_sha256 = "d" * 64
+
+        self.store.save_state(state)
+        loaded = self.store.load_state(task.task_id)
+
+        self.assertEqual(loaded.active_validation_round, 2)
+        self.assertEqual(loaded.validation_start_diff_sha256, "d" * 64)
+
+    def test_result_round_trips_evaluation_bindings_and_existing_artifacts(
+        self,
+    ) -> None:
+        task = self._task("bound-result")
+        state = self.store.initialize_run(task)
+        state.base_commit = "a" * 40
+        state.last_diff_sha256 = "b" * 64
+        command = self._command()
+        self.store.write_command_log(task.task_id, 1, 1, command)
+        validation_round = ValidationRound(
+            round_number=1,
+            targeted_results=[command],
+            passed=True,
+            stage="targeted",
+        )
+        state.add_round(validation_round)
+        state.mark_success()
+        snapshot = ValidationEvidenceSnapshot.from_round(
+            validation_round,
+            task_id=task.task_id,
+            base_commit=state.base_commit,
+            final_diff_sha256=state.last_diff_sha256,
+            control_repo_root=self.repo_root,
+            run_dir=self.store.run_dir(task.task_id),
+        )
+        self.store.save_validation_evidence(task.task_id, snapshot)
+        evaluation_root = self.store.run_dir(task.task_id) / "evaluations/round-01"
+        evaluation_root.mkdir(parents=True)
+        binding = {
+            "validation_evidence_sha256": snapshot.snapshot_sha256,
+            "final_diff_sha256": state.last_diff_sha256,
+            "context_sha256": "c" * 64,
+            "changed_files_sha256": "d" * 64,
+            "evaluation_input_sha256": "e" * 64,
+        }
+        (evaluation_root / "spec.json").write_text(
+            json.dumps({"schema_version": 2, **binding}),
+            encoding="utf-8",
+        )
+        (evaluation_root / "aggregate.json").write_text(
+            json.dumps({"schema_version": 2, **binding}),
+            encoding="utf-8",
+        )
+        result = RunResult.from_run(task, state)
+
+        result.attach_evaluation_artifacts(self.store.run_dir(task.task_id))
+        persisted = RunResult.from_dict(result.to_dict())
+
+        self.assertEqual(persisted.validation_evidence_sha256, snapshot.snapshot_sha256)
+        self.assertEqual(persisted.context_sha256, "c" * 64)
+        self.assertEqual(persisted.changed_files_sha256, "d" * 64)
+        self.assertEqual(persisted.evaluation_input_sha256, "e" * 64)
+        self.assertEqual(
+            persisted.artifacts["validation_evidence"],
+            "validation/evidence-round-01.json",
+        )
+        self.assertEqual(
+            persisted.artifacts["spec_evaluation"],
+            "evaluations/round-01/spec.json",
+        )
+        self.assertNotIn("architecture_evaluation", persisted.artifacts)
+
+        legacy_value = result.to_dict()
+        for key in (
+            "validation_evidence_sha256",
+            "context_sha256",
+            "changed_files_sha256",
+            "evaluation_input_sha256",
+        ):
+            legacy_value.pop(key)
+        legacy = RunResult.from_dict(legacy_value)
+        self.assertEqual(legacy.validation_evidence_sha256, "")
+        self.assertEqual(legacy.evaluation_input_sha256, "")
+
+    def test_result_does_not_attach_previous_evidence_during_active_validation(
+        self,
+    ) -> None:
+        task = self._task("active-validation-result")
+        state = self.store.initialize_run(task)
+        state.base_commit = "a" * 40
+        state.last_diff_sha256 = "b" * 64
+        command = self._command()
+        self.store.write_command_log(task.task_id, 1, 1, command)
+        validation_round = ValidationRound(
+            round_number=1,
+            targeted_results=[command],
+            passed=True,
+            stage="targeted",
+        )
+        state.add_round(validation_round)
+        snapshot = ValidationEvidenceSnapshot.from_round(
+            validation_round,
+            task_id=task.task_id,
+            base_commit=state.base_commit,
+            final_diff_sha256=state.last_diff_sha256,
+            control_repo_root=self.repo_root,
+            run_dir=self.store.run_dir(task.task_id),
+        )
+        self.store.save_validation_evidence(task.task_id, snapshot)
+        state.active_validation_round = 2
+        state.mark_infrastructure_error("validation interrupted")
+
+        result = RunResult.from_run(task, state)
+        result.attach_evaluation_artifacts(self.store.run_dir(task.task_id))
+        payload = result.to_dict()
+        restored = RunResult.from_dict(payload)
+
+        self.assertFalse(payload["validation"]["passed"])
+        self.assertEqual(payload["validation"]["active_round"], 2)
+        self.assertNotIn("validation_evidence", result.artifacts)
+        self.assertEqual(restored.active_validation_round, 2)
 
     def test_active_lock_rejects_a_second_task_until_released(self) -> None:
         first_lock = self.store.acquire_active_lock("task-first")
@@ -292,9 +417,7 @@ class StateAndReportTests(unittest.TestCase):
             state.mark_manual_review(f"API key {api_key}")
             self.store.save_round(task.task_id, validation_round)
             self.store.save_state(state)
-            result_path, report_path = ReportBuilder().persist(
-                self.store, task, state
-            )
+            result_path, report_path = ReportBuilder().persist(self.store, task, state)
 
         log_path = self.repo_root / str(command.log_path)
         artifacts = [
@@ -324,9 +447,7 @@ class StateAndReportTests(unittest.TestCase):
             exit_code=1,
             stderr=(
                 "Bearer bearer-repair-secret\n"
-                "token=token-repair-secret\n"
-                + "X" * 20_000
-                + environment_secret
+                "token=token-repair-secret\n" + "X" * 20_000 + environment_secret
             ),
         )
         validation_round = ValidationRound(
@@ -398,7 +519,9 @@ class StateAndReportTests(unittest.TestCase):
                 )
                 command = self._command(
                     exit_code=0 if status is RunStatus.SUCCESS else 1,
-                    stderr="assertion failed" if status is not RunStatus.SUCCESS else "",
+                    stderr="assertion failed"
+                    if status is not RunStatus.SUCCESS
+                    else "",
                     log_path=(
                         f".codex-orchestrator/runs/{task.task_id}/logs/"
                         "round-01/01-targeted.log"
