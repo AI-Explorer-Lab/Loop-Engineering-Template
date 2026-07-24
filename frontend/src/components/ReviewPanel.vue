@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 
+import {
+  deliveryProgressFor,
+  useOrchestrator,
+} from "../composables/useOrchestrator";
 import type { ReviewDecision, TaskData } from "../types/task";
 
 const props = defineProps<{ task: TaskData; submitting: boolean }>();
+const store = useOrchestrator();
 const emit = defineEmits<{
   review: [payload: { decision: ReviewDecision; reviewer: string; comment: string; commit_subject: string }];
   retryCommit: [];
@@ -22,13 +27,21 @@ const decisionLabels: Record<ReviewDecision, string> = {
   rejected: "驳回任务",
 };
 const existingReview = computed(() => props.task.review as Record<string, unknown> | null);
+const deliveryProgress = computed(() =>
+  deliveryProgressFor(
+    props.task,
+    store.capabilities.value === null
+      ? null
+      : store.capabilities.value.status !== "unavailable",
+  ),
+);
 const deliveryLabels: Record<TaskData["delivery_status"], string> = {
   not_ready: "尚未进入交付",
   commit_pending: "等待创建 commit",
   committing: "正在创建 commit",
-  committed: "commit 已创建",
-  archive_pending: "知识归档待完成",
-  archived: "已归档",
+  committed: "Commit 已完成",
+  archive_pending: "Archiver 正在生成归档/写入知识",
+  archived: "归档完成",
   failed: "交付需要重试",
   unavailable: "历史信息缺失",
 };
@@ -123,10 +136,17 @@ watch(
 
     <dl class="review-result delivery-state-card">
       <div><dt>交付状态</dt><dd>{{ deliveryLabels[task.delivery_status] }}</dd></div>
-      <div v-if="task.commit.commit_sha"><dt>Commit</dt><dd><code>{{ task.commit.commit_sha }}</code></dd></div>
+      <div><dt>审批</dt><dd>{{ deliveryProgress.review }}</dd></div>
+      <div><dt>Commit</dt><dd>{{ deliveryProgress.commit }}</dd></div>
+      <div><dt>Archiver</dt><dd>{{ deliveryProgress.archive }}</dd></div>
+      <div v-if="task.commit.commit_sha"><dt>Commit SHA</dt><dd><code>{{ task.commit.commit_sha }}</code></dd></div>
       <div v-if="task.commit.subject"><dt>Subject</dt><dd>{{ task.commit.subject }}</dd></div>
       <div v-if="task.archive.summary"><dt>知识归档</dt><dd>{{ archiveOutbox.status === 'completed' ? '已完成' : '本地摘要已保存' }}</dd></div>
     </dl>
+    <div v-if="submitting && !deliveryProgress.visible" class="callout warning-callout" data-test="review-submitting">
+      <strong>正在记录审批</strong>
+      <p>审批返回后会继续显示 Commit 与 Archiver 的实际进度。</p>
+    </div>
     <div v-if="task.delivery_status === 'failed'" class="callout danger-callout delivery-retry">
       <strong>自动交付未完成</strong>
       <p>{{ task.last_error_summary || task.commit.error || "可以在不重新生成代码的情况下重试对应检查点。" }}</p>

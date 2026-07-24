@@ -67,6 +67,7 @@ class TaskService:
             )
         )
         self._submission_lock = RLock()
+        self._pending_archive_jobs: set[str] = set()
 
     def start_task(
         self,
@@ -107,9 +108,16 @@ class TaskService:
 
     def get_task(self, task_id: str) -> TaskSnapshot:
         self._validate_task_id(task_id)
-        mapper, _ = self._mapper_for_task(task_id)
+        mapper, queue_id = self._mapper_for_task(task_id)
         snapshot = mapper.load_snapshot(task_id)
         if snapshot is not None:
+            if (
+                queue_id is None
+                and snapshot.review_status == "approved"
+                and snapshot.delivery_status in {"committed", "archive_pending"}
+            ):
+                self._schedule_archive_recovery(task_id, mapper.store)
+                return mapper.load_snapshot(task_id) or snapshot
             return snapshot
 
         record = self.executor.get(task_id)
@@ -301,7 +309,7 @@ class TaskService:
                 )
                 if review.decision.value == "approved":
                     self.delivery_service.deliver(task_id, review=review)
-                    self._archive_after_commit(task_id, mapper.store)
+                    self._schedule_archive_after_commit(task_id, mapper.store)
             else:
                 workflow = self.queue_workflow_factory()
                 queue_state, _ = workflow.record_review(
@@ -349,7 +357,7 @@ class TaskService:
                 GitDeliveryService(self.repo_root, store=mapper.store).deliver(
                     task_id, review=review
                 )
-                self._archive_after_commit(task_id, mapper.store)
+                self._schedule_archive_after_commit(task_id, mapper.store)
             else:
                 workflow = self.queue_workflow_factory()
                 queue_state = workflow.recover_approved_delivery(
@@ -369,15 +377,25 @@ class TaskService:
 
     def retry_archive(self, task_id: str) -> TaskSnapshot:
         self._validate_task_id(task_id)
-        mapper, _queue_id = self._mapper_for_task(task_id)
+        mapper, queue_id = self._mapper_for_task(task_id)
         if mapper.load_task(task_id) is None:
             raise TaskNotFoundError(task_id)
-        if self.archive_retry_callback is None:
-            raise ReviewConflictError("archive capability is unavailable")
-        try:
-            self.archive_retry_callback(task_id, store=mapper.store)
-        except Exception as exc:
-            raise ReviewConflictError(str(exc)) from exc
+        if queue_id is None:
+            callback = self._archive_recovery_callback(task_id, mapper.store)
+            if callback is None:
+                raise ReviewConflictError("archive capability is unavailable")
+            self._schedule_archive(
+                task_id,
+                mapper.store,
+                callback=callback,
+            )
+        else:
+            if self.archive_retry_callback is None:
+                raise ReviewConflictError("archive capability is unavailable")
+            try:
+                self.archive_retry_callback(task_id, store=mapper.store)
+            except Exception as exc:
+                raise ReviewConflictError(str(exc)) from exc
         snapshot = mapper.load_snapshot(task_id)
         if snapshot is None:
             raise TaskNotFoundError(task_id)
@@ -386,23 +404,157 @@ class TaskService:
     def close(self, *, wait: bool = False) -> None:
         self.executor.shutdown(wait=wait)
 
+    def _schedule_archive_after_commit(self, task_id: str, store: Any) -> None:
+        if self.archive_callback is None:
+            return
+        self._schedule_archive(task_id, store, callback=self.archive_callback)
+
+    def _schedule_archive_recovery(self, task_id: str, store: Any) -> None:
+        callback = self._archive_recovery_callback(task_id, store)
+        if callback is None:
+            return
+        self._schedule_archive(task_id, store, callback=callback)
+
+    def _archive_recovery_callback(
+        self,
+        task_id: str,
+        store: Any,
+    ) -> ArchiveCallback | None:
+        outbox_path = store.run_dir(task_id) / "archive" / "outbox.json"
+        if outbox_path.is_file():
+            return self.archive_retry_callback or self.archive_callback
+        return self.archive_callback
+
+    def _schedule_archive(
+        self,
+        task_id: str,
+        store: Any,
+        *,
+        callback: ArchiveCallback,
+    ) -> None:
+        with self._submission_lock:
+            if task_id in self._pending_archive_jobs:
+                return
+            state = store.load_state(task_id)
+            state.delivery_status = DeliveryStatus.ARCHIVE_PENDING
+            state.last_error_summary = ""
+            store.save_state(state)
+            self._pending_archive_jobs.add(task_id)
+            self._submit_archive_when_available(task_id, store, callback)
+
+    def _submit_archive_when_available(
+        self,
+        task_id: str,
+        store: Any,
+        callback: ArchiveCallback,
+    ) -> None:
+        active_identifier = self.executor.active_task_id()
+        if active_identifier is not None:
+            active = self.executor.get(active_identifier)
+            if active is None:  # pragma: no cover - guarded by TaskExecutor's lock
+                self._pending_archive_jobs.discard(task_id)
+                self._mark_archive_failed(
+                    task_id,
+                    store,
+                    RuntimeError("active executor operation is unavailable"),
+                )
+                return
+            active.future.add_done_callback(
+                lambda _future: self._resume_archive_submission(
+                    task_id,
+                    store,
+                    callback,
+                )
+            )
+            return
+        try:
+            self.executor.submit_operation(
+                task_id,
+                lambda: self._run_archive_job(task_id, store, callback),
+            )
+        except RuntimeError as exc:
+            active_identifier = self.executor.active_task_id()
+            active = (
+                None
+                if active_identifier is None
+                else self.executor.get(active_identifier)
+            )
+            if active is not None:
+                active.future.add_done_callback(
+                    lambda _future: self._resume_archive_submission(
+                        task_id,
+                        store,
+                        callback,
+                    )
+                )
+                return
+            self._pending_archive_jobs.discard(task_id)
+            self._mark_archive_failed(task_id, store, exc)
+
+    def _resume_archive_submission(
+        self,
+        task_id: str,
+        store: Any,
+        callback: ArchiveCallback,
+    ) -> None:
+        with self._submission_lock:
+            if task_id not in self._pending_archive_jobs:
+                return
+            self._submit_archive_when_available(task_id, store, callback)
+
+    def _run_archive_job(
+        self,
+        task_id: str,
+        store: Any,
+        callback: ArchiveCallback,
+    ) -> None:
+        try:
+            self._invoke_archive_callback(task_id, store, callback)
+            state = store.load_state(task_id)
+            if state.delivery_status not in {
+                DeliveryStatus.ARCHIVED,
+                DeliveryStatus.FAILED,
+            }:
+                self._mark_archive_failed(
+                    task_id,
+                    store,
+                    RuntimeError(
+                        "archive callback completed without a terminal delivery status"
+                    ),
+                )
+        finally:
+            with self._submission_lock:
+                self._pending_archive_jobs.discard(task_id)
+
     def _archive_after_commit(self, task_id: str, store: Any) -> None:
         if self.archive_callback is None:
             return
+        self._invoke_archive_callback(task_id, store, self.archive_callback)
+
+    def _invoke_archive_callback(
+        self,
+        task_id: str,
+        store: Any,
+        callback: ArchiveCallback,
+    ) -> None:
         try:
-            self.archive_callback(task_id, store=store)
+            callback(task_id, store=store)
         except Exception as exc:
-            state = store.load_state(task_id)
-            state.delivery_status = DeliveryStatus.FAILED
-            state.last_error_summary = redact_sensitive_text(
-                str(exc) or type(exc).__name__
-            )
-            store.save_state(state)
-            store.append_event(
-                task_id,
-                "knowledge.write_failed",
-                {"error": state.last_error_summary},
-            )
+            self._mark_archive_failed(task_id, store, exc)
+
+    @staticmethod
+    def _mark_archive_failed(task_id: str, store: Any, error: Exception) -> None:
+        state = store.load_state(task_id)
+        state.delivery_status = DeliveryStatus.FAILED
+        state.last_error_summary = redact_sensitive_text(
+            str(error) or type(error).__name__
+        )
+        store.save_state(state)
+        store.append_event(
+            task_id,
+            "knowledge.write_failed",
+            {"error": state.last_error_summary},
+        )
 
     def _ensure_available(self) -> None:
         active_task_id = self.executor.active_task_id()

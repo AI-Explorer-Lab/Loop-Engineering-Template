@@ -55,6 +55,7 @@ vi.mock("../src/api/platform", () => platformApi);
 vi.mock("../src/api/health", () => healthApi);
 
 import App from "../src/App.vue";
+import { deliveryProgressFor } from "../src/composables/useOrchestrator";
 import { routes } from "../src/router";
 import type { PlanDraft, QueueData, TaskData } from "../src/types/task";
 
@@ -304,6 +305,244 @@ describe("App workbench", () => {
       decision: "approved", reviewer: "Local Reviewer", comment: "Checked.", commit_subject: "Add filtering", reviewed_diff_sha256: "b".repeat(64),
     });
     expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Local Reviewer");
+    wrapper.unmount();
+  });
+
+  it("polls an approved delivery until archiving reaches a terminal state", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    const review = {
+      decision: "approved",
+      reviewer: "Local Reviewer",
+      comment: "Checked.",
+      commit_subject: "Add filtering",
+      reviewed_diff_sha256: "b".repeat(64),
+    };
+    taskApi.getTask
+      .mockResolvedValueOnce(task("success"))
+      .mockResolvedValueOnce(task("success", {
+        review_status: "approved",
+        delivery_status: "archive_pending",
+        review,
+        commit: {
+          status: "committed",
+          commit_sha: "c".repeat(40),
+          subject: "Add filtering",
+        },
+        archive: {
+          summary: { delivery_status: "archive_pending" },
+          outbox: {
+            status: "pending",
+            items: [
+              { status: "completed" },
+              { status: "pending" },
+            ],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(task("success", {
+        review_status: "approved",
+        delivery_status: "archived",
+        review,
+        commit: {
+          status: "committed",
+          commit_sha: "c".repeat(40),
+          subject: "Add filtering",
+        },
+        archive: {
+          summary: { delivery_status: "archived" },
+          outbox: {
+            status: "completed",
+            items: [
+              { status: "completed" },
+              { status: "completed" },
+            ],
+          },
+        },
+      }));
+    taskApi.submitTaskReview.mockResolvedValue(task("success", {
+      review_status: "approved",
+      delivery_status: "archive_pending",
+      review,
+      commit: {
+        status: "committed",
+        commit_sha: "c".repeat(40),
+        subject: "Add filtering",
+      },
+    }));
+    const { wrapper } = await mountAt("/review");
+
+    await wrapper.get('[data-test="reviewer"]').setValue("Local Reviewer");
+    await wrapper.get('[data-test="review-comment"]').setValue("Checked.");
+    await wrapper.get('[data-test="approve"]').trigger("click");
+    await wrapper.get('[data-test="confirm-review"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("审批已记录");
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Commit 已完成");
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Archiver 正在生成归档总结");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(taskApi.getTask).toHaveBeenCalledTimes(2);
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Archiver 正在写入 Knowledge");
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Knowledge 1/2");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(taskApi.getTask).toHaveBeenCalledTimes(3);
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("归档完成");
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Knowledge 2/2");
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(taskApi.getTask).toHaveBeenCalledTimes(3);
+    wrapper.unmount();
+  });
+
+  it("treats committed as terminal when the project has no Archiver even if metrics fail", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    platformApi.getCapabilities.mockResolvedValue({
+      status: "unavailable",
+      project_id: "default",
+      reason: "harness feature is disabled",
+    });
+    platformApi.getMetrics.mockRejectedValue(new Error("metrics unavailable"));
+    const committed = task("success", {
+      review_status: "approved",
+      delivery_status: "committed",
+      review: {
+        decision: "approved",
+        reviewer: "Local Reviewer",
+        comment: "Checked.",
+        commit_subject: "Add filtering",
+        reviewed_diff_sha256: "b".repeat(64),
+      },
+      commit: {
+        status: "committed",
+        commit_sha: "c".repeat(40),
+      },
+    });
+    taskApi.getTask
+      .mockResolvedValueOnce(task("success"))
+      .mockResolvedValue(committed);
+    taskApi.submitTaskReview.mockResolvedValue(committed);
+
+    const { wrapper } = await mountAt("/review");
+    await wrapper.get('[data-test="reviewer"]').setValue("Local Reviewer");
+    await wrapper.get('[data-test="review-comment"]').setValue("Checked.");
+    await wrapper.get('[data-test="approve"]').trigger("click");
+    await wrapper.get('[data-test="confirm-review"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-test="review-panel"]').text()).toContain(
+      "Archiver 未启用，Commit 为交付终态",
+    );
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(taskApi.getTask).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(taskApi.getTask).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("renders persisted archive state and reports unknown capability honestly", () => {
+    const pending = task("success", {
+      review_status: "approved",
+      delivery_status: "archive_pending",
+      review: { decision: "approved" },
+      commit: {
+        status: "committed",
+        commit_sha: "c".repeat(40),
+      },
+    });
+    expect(deliveryProgressFor(pending, true).archive).toBe(
+      "Archiver 正在生成归档总结",
+    );
+
+    const committed = task("success", {
+      review_status: "approved",
+      delivery_status: "committed",
+      review: { decision: "approved" },
+      commit: {
+        status: "committed",
+        commit_sha: "c".repeat(40),
+      },
+    });
+    expect(deliveryProgressFor(committed, null).archive).toBe(
+      "Archiver 状态待确认，Commit 已完成",
+    );
+  });
+
+  it("stops delivery polling when Archiver reports a failure", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    const committed = {
+      status: "committed",
+      commit_sha: "c".repeat(40),
+    };
+    taskApi.getTask
+      .mockResolvedValueOnce(task("success", {
+        review_status: "approved",
+        delivery_status: "archive_pending",
+        review: { decision: "approved" },
+        commit: committed,
+      }))
+      .mockResolvedValueOnce(task("success", {
+        review_status: "approved",
+        delivery_status: "failed",
+        review: { decision: "approved" },
+        commit: committed,
+        archive: {
+          outbox: {
+            status: "failed",
+            items: [
+              { status: "completed" },
+              { status: "failed" },
+            ],
+          },
+        },
+      }));
+
+    const { wrapper } = await mountAt("/monitor");
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(taskApi.getTask).toHaveBeenCalledTimes(2);
+    expect(wrapper.get('[data-test="delivery-progress"]').text()).toContain(
+      "Archiver 写入知识失败",
+    );
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(taskApi.getTask).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("does not let audit events invent a delivery state", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    taskApi.getTask.mockResolvedValue(task("success"));
+    platformApi.getEvents.mockResolvedValue({
+      items: [
+        {
+          seq: 1,
+          type: "review.recorded",
+          timestamp: "2026-07-15T08:00:02+08:00",
+          payload: { decision: "approved" },
+        },
+        {
+          seq: 2,
+          type: "commit.completed",
+          timestamp: "2026-07-15T08:00:03+08:00",
+        },
+        {
+          seq: 3,
+          type: "archive.queued",
+          timestamp: "2026-07-15T08:00:04+08:00",
+        },
+      ],
+      next_cursor: 3,
+      terminal: true,
+    });
+
+    const { wrapper } = await mountAt("/monitor");
+    expect(wrapper.find('[data-test="delivery-progress"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

@@ -2,9 +2,14 @@
 import { computed } from "vue";
 
 import CopyButton from "./CopyButton.vue";
+import {
+  deliveryProgressFor,
+  useOrchestrator,
+} from "../composables/useOrchestrator";
 import type { TaskData } from "../types/task";
 
 const props = defineProps<{ task: TaskData }>();
+const store = useOrchestrator();
 
 const labels: Record<TaskData["status"], string> = {
   accepted: "已接收",
@@ -29,15 +34,23 @@ const deliveryLabels: Record<TaskData["delivery_status"], string> = {
   not_ready: "未进入交付",
   commit_pending: "等待 commit",
   committing: "正在 commit",
-  committed: "已 commit",
-  archive_pending: "等待归档",
-  archived: "已归档",
+  committed: "Commit 已完成",
+  archive_pending: "Archiver 正在生成归档/写入知识",
+  archived: "归档完成",
   failed: "交付失败",
   unavailable: "历史信息缺失",
 };
 
 const statusLabel = computed(() => labels[props.task.status]);
 const reviewLabel = computed(() => reviewLabels[props.task.review_status]);
+const deliveryProgress = computed(() =>
+  deliveryProgressFor(
+    props.task,
+    store.capabilities.value === null
+      ? null
+      : store.capabilities.value.status !== "unavailable",
+  ),
+);
 const effectivePermissions = computed(() => {
   const effective = props.task.permissions.effective;
   return typeof effective === "object" && effective !== null
@@ -75,6 +88,12 @@ function formatTime(value: string | null): string {
         {{ statusLabel }}
       </span>
     </div>
+
+    <dl v-if="deliveryProgress.visible" class="review-result delivery-state-card" data-test="delivery-progress">
+      <div><dt>审批</dt><dd>{{ deliveryProgress.review }}</dd></div>
+      <div><dt>Commit</dt><dd>{{ deliveryProgress.commit }}</dd></div>
+      <div><dt>Archiver</dt><dd>{{ deliveryProgress.archive }}</dd></div>
+    </dl>
 
     <div class="metric-strip">
       <div><span>当前阶段</span><strong>{{ task.phase || "等待启动" }}</strong></div>
