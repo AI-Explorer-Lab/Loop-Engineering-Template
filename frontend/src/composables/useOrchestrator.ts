@@ -79,6 +79,11 @@ const ACTIVE_TASK_STATUSES = new Set<TaskData["status"]>([
   "pausing",
   "cancelling",
 ]);
+const ACTIVE_DELIVERY_STATUSES = new Set<TaskData["delivery_status"]>([
+  "commit_pending",
+  "committing",
+  "archive_pending",
+]);
 const ACTIVE_QUEUE_STATUSES = new Set<QueueData["status"]>([
   "pending",
   "running",
@@ -93,6 +98,115 @@ interface StoredRun {
 
 interface StoredRuns {
   [projectId: string]: StoredRun;
+}
+
+export interface DeliveryProgress {
+  visible: boolean;
+  review: string;
+  commit: string;
+  archive: string;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export function deliveryProgressFor(
+  task: TaskData,
+  archiveCapabilityAvailable: boolean | null = true,
+): DeliveryProgress {
+  const commit = record(task.commit);
+  const archiveSummary = record(task.archive.summary);
+  const archiveOutbox = record(task.archive.outbox);
+  const outboxItems = Array.isArray(archiveOutbox.items)
+    ? archiveOutbox.items.map(record)
+    : [];
+  const completedKnowledgeItems = outboxItems.filter(
+    (item) => item.status === "completed",
+  ).length;
+  const knowledgeProgress = outboxItems.length
+    ? `（Knowledge ${completedKnowledgeItems}/${outboxItems.length}）`
+    : "";
+  const deliveryStarted = !["not_ready", "unavailable"].includes(task.delivery_status);
+  const commitArtifactComplete =
+    commit.status === "committed" ||
+    Boolean(commit.commit_sha) ||
+    ["committed", "archive_pending", "archived"].includes(task.delivery_status);
+  const commitFailed = task.delivery_status === "failed" && !commitArtifactComplete;
+  const commitComplete = commitArtifactComplete;
+  const archiveArtifactComplete =
+    task.delivery_status === "archived" ||
+    archiveSummary.delivery_status === "archived" ||
+    archiveOutbox.status === "completed";
+  const archiveFailed = task.delivery_status === "failed" && commitComplete;
+  const archiveComplete = archiveArtifactComplete;
+  const archiveUnavailable =
+    archiveCapabilityAvailable === false &&
+    task.delivery_status === "committed" &&
+    Object.keys(archiveSummary).length === 0 &&
+    Object.keys(archiveOutbox).length === 0;
+  const archiveCapabilityUnknown =
+    archiveCapabilityAvailable === null &&
+    task.delivery_status === "committed" &&
+    Object.keys(archiveSummary).length === 0 &&
+    Object.keys(archiveOutbox).length === 0;
+  const archiveStarted =
+    archiveComplete ||
+    task.delivery_status === "archive_pending" ||
+    (task.delivery_status === "committed" && !archiveUnavailable) ||
+    Object.keys(archiveSummary).length > 0 ||
+    Object.keys(archiveOutbox).length > 0;
+  const approvalRecorded =
+    task.review_status === "approved" ||
+    String(record(task.review).decision || "") === "approved" ||
+    deliveryStarted ||
+    commitComplete ||
+    archiveStarted;
+  const commitStarted =
+    commitComplete ||
+    ["commit_pending", "committing"].includes(task.delivery_status);
+  let archive = "等待 Archiver";
+  if (archiveComplete) {
+    archive = `归档完成${knowledgeProgress}`;
+  } else if (archiveFailed) {
+    archive = outboxItems.length
+      ? `Archiver 写入知识失败${knowledgeProgress}`
+      : "Archiver 处理失败";
+  } else if (archiveUnavailable) {
+    archive = "Archiver 未启用，Commit 为交付终态";
+  } else if (archiveCapabilityUnknown) {
+    archive = "Archiver 状态待确认，Commit 已完成";
+  } else if (outboxItems.length) {
+    archive = `Archiver 正在写入 Knowledge${knowledgeProgress}`;
+  } else if (archiveStarted || commitComplete) {
+    archive = "Archiver 正在生成归档总结";
+  }
+
+  return {
+    visible: approvalRecorded || commitStarted || archiveStarted,
+    review: approvalRecorded ? "审批已记录" : "等待审批",
+    commit: commitComplete
+      ? "Commit 已完成"
+      : commitFailed
+        ? "Commit 创建失败"
+        : commitStarted
+          ? "Commit 正在创建"
+          : "等待 Commit",
+    archive,
+  };
+}
+
+function shouldPollTask(value: TaskData): boolean {
+  return (
+    ACTIVE_TASK_STATUSES.has(value.status) ||
+    ACTIVE_DELIVERY_STATUSES.has(value.delivery_status)
+  );
+}
+
+function shouldStartDeliveryPoll(value: TaskData): boolean {
+  return shouldPollTask(value) || value.delivery_status === "committed";
 }
 
 function readStorage(key: string): string | null {
@@ -346,11 +460,14 @@ export function createOrchestrator() {
       pageError.value = "";
       if (remember) rememberRun("task", taskId);
       await Promise.all([loadTaskArtifacts(taskId), refreshEventsAndLogs()]);
-      if (ACTIVE_TASK_STATUSES.has(latest.status)) {
+      if (shouldPollTask(latest)) {
         schedulePoll();
-        if (!eventSource) connectEventStream();
       } else {
         clearPollTimer();
+      }
+      if (ACTIVE_TASK_STATUSES.has(latest.status)) {
+        if (!eventSource) connectEventStream();
+      } else {
         closeEventStream();
       }
     } catch (error) {
@@ -487,17 +604,26 @@ export function createOrchestrator() {
   }
 
   async function refreshHarnessStatus(): Promise<void> {
-    try {
-      [capabilities.value, metrics.value] = await Promise.all([
-        getCapabilities(),
-        getMetrics(),
-      ]);
-      harnessError.value = "";
-    } catch (error) {
+    const [capabilityResult, metricsResult] = await Promise.allSettled([
+      getCapabilities(),
+      getMetrics(),
+    ]);
+    let statusError: unknown = null;
+    if (capabilityResult.status === "fulfilled") {
+      capabilities.value = capabilityResult.value;
+    } else {
       capabilities.value = null;
-      metrics.value = null;
-      harnessError.value = messageFrom(error, "Harness 能力状态读取失败。");
+      statusError = capabilityResult.reason;
     }
+    if (metricsResult.status === "fulfilled") {
+      metrics.value = metricsResult.value;
+    } else {
+      metrics.value = null;
+      if (statusError === null) statusError = metricsResult.reason;
+    }
+    harnessError.value = statusError === null
+      ? ""
+      : messageFrom(statusError, "Harness 能力状态读取失败。");
   }
 
   async function generatePlan(payload: PlanCreatePayload): Promise<PlanDraft | null> {
@@ -633,12 +759,21 @@ export function createOrchestrator() {
     reviewing.value = true;
     pageError.value = "";
     try {
-      task.value = await submitTaskReview(task.value.task_id, {
+      const reviewed = await submitTaskReview(task.value.task_id, {
         ...payload,
         reviewed_diff_sha256: task.value.final_diff_sha256,
       });
-      if (queue.value) await refreshQueue(queue.value.queue_id);
-      else await loadTaskArtifacts(task.value.task_id);
+      task.value = reviewed;
+      if (queue.value) {
+        await refreshQueue(queue.value.queue_id);
+      } else {
+        await Promise.all([
+          loadTaskArtifacts(reviewed.task_id),
+          refreshEventsAndLogs(),
+        ]);
+        if (shouldStartDeliveryPoll(reviewed)) schedulePoll();
+        else clearPollTimer();
+      }
       await refreshNotifications();
       return true;
     } catch (error) {
@@ -654,11 +789,20 @@ export function createOrchestrator() {
     controlling.value = true;
     pageError.value = "";
     try {
-      task.value = kind === "commit"
+      const updated = kind === "commit"
         ? await retryTaskCommit(task.value.task_id)
         : await retryTaskArchive(task.value.task_id);
-      if (queue.value) await refreshQueue(queue.value.queue_id);
-      else await loadTaskArtifacts(task.value.task_id);
+      task.value = updated;
+      if (queue.value) {
+        await refreshQueue(queue.value.queue_id);
+      } else {
+        await Promise.all([
+          loadTaskArtifacts(updated.task_id),
+          refreshEventsAndLogs(),
+        ]);
+        if (shouldStartDeliveryPoll(updated)) schedulePoll();
+        else clearPollTimer();
+      }
     } catch (error) {
       recordError(error, kind === "commit" ? "Commit 重试失败。" : "知识归档重试失败。");
     } finally {
