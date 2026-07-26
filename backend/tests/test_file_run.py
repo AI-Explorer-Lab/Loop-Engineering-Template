@@ -53,6 +53,8 @@ def test_mapper_reads_running_and_final_artifacts(tmp_path: Path) -> None:
     assert snapshot.report_url == "/api/tasks/task-1/report"
     assert snapshot.rounds[0]["commands"][0]["passed"] is True
     assert "stdout" not in snapshot.rounds[0]["commands"][0]
+    assert snapshot.audit_summary["integrity_status"] == "valid"
+    assert snapshot.audit_summary["event_count_trusted"] is True
     assert "# 任务报告" in (mapper.load_report(task.task_id) or "")
 
 
@@ -103,6 +105,32 @@ def test_mapper_rejects_unsafe_task_id(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unsafe task id"):
         mapper.load_snapshot("../outside")
+
+
+def test_mapper_marks_invalid_event_count_as_untrusted(tmp_path: Path) -> None:
+    store = StateStore(tmp_path)
+    task = TaskSpec(
+        task_id="invalid-events",
+        requirement="Keep invalid history visible",
+        acceptance_criteria=["Do not claim a trusted timeline"],
+    )
+    state = store.initialize_run(task)
+    state.mark_success()
+    store.save_state(state)
+    events_path = store.run_dir(task.task_id) / "events.jsonl"
+    events_path.write_text(
+        '{"seq": 1, "type": "one"}\n{"seq": 1, "type": "duplicate"}\n',
+        encoding="utf-8",
+    )
+
+    snapshot = FileRunMapper(tmp_path).load_snapshot(task.task_id)
+
+    assert snapshot is not None
+    assert snapshot.status == "success"
+    assert snapshot.audit_summary["integrity_status"] == "invalid"
+    assert snapshot.audit_summary["event_count"] == 2
+    assert snapshot.audit_summary["event_count_trusted"] is False
+    assert snapshot.audit_summary["issue_count"] == 1
 
 
 def test_legacy_run_is_read_only_and_marked_as_incomplete(tmp_path: Path) -> None:

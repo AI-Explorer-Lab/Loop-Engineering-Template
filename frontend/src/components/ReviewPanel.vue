@@ -27,6 +27,9 @@ const decisionLabels: Record<ReviewDecision, string> = {
   rejected: "驳回任务",
 };
 const existingReview = computed(() => props.task.review as Record<string, unknown> | null);
+const auditIntegrityInvalid = computed(
+  () => props.task.audit_summary.integrity_status === "invalid",
+);
 const deliveryProgress = computed(() =>
   deliveryProgressFor(
     props.task,
@@ -52,11 +55,13 @@ const archiveOutbox = computed(() => {
     : {};
 });
 const canRetryArchive = computed(() =>
+  !auditIntegrityInvalid.value &&
   props.task.delivery_status === "failed" &&
   props.task.commit.status === "committed" &&
   archiveOutbox.value.status !== "completed",
 );
 const canRetryCommit = computed(() =>
+  !auditIntegrityInvalid.value &&
   props.task.delivery_status === "failed" && props.task.commit.status !== "committed",
 );
 const impactCopy = computed(() => {
@@ -77,6 +82,10 @@ const impactCopy = computed(() => {
 });
 
 function prepare(decision: ReviewDecision): void {
+  if (auditIntegrityInvalid.value) {
+    formError.value = "审计事件记录无效，不能在原任务上继续审核或交付。";
+    return;
+  }
   if (!reviewer.value.trim()) {
     formError.value = "请填写审核人。";
     return;
@@ -133,6 +142,10 @@ watch(
       <strong>暂时不能提交审核</strong>
       <p>Diff 中有 {{ task.diff_redaction_count }} 处疑似敏感信息已被替换，请先移除后重新运行。</p>
     </div>
+    <div v-if="auditIntegrityInvalid" class="callout danger-callout" data-test="audit-integrity-block">
+      <strong>审计完整性阻断</strong>
+      <p>原始事件日志存在重复、跳号、倒序或损坏。请保留原任务证据并新建 rerun，不能在这里批准、Commit 或重试 Archive。</p>
+    </div>
 
     <dl class="review-result delivery-state-card">
       <div><dt>交付状态</dt><dd>{{ deliveryLabels[task.delivery_status] }}</dd></div>
@@ -150,8 +163,8 @@ watch(
     <div v-if="task.delivery_status === 'failed'" class="callout danger-callout delivery-retry">
       <strong>自动交付未完成</strong>
       <p>{{ task.last_error_summary || task.commit.error || "可以在不重新生成代码的情况下重试对应检查点。" }}</p>
-      <button v-if="canRetryCommit" class="secondary-button" type="button" :disabled="submitting" @click="emit('retryCommit')">重试 commit</button>
-      <button v-if="canRetryArchive" class="secondary-button" type="button" :disabled="submitting" @click="emit('retryArchive')">重试知识归档</button>
+      <button v-if="canRetryCommit" class="secondary-button" type="button" :disabled="submitting || auditIntegrityInvalid" @click="emit('retryCommit')">重试 commit</button>
+      <button v-if="canRetryArchive" class="secondary-button" type="button" :disabled="submitting || auditIntegrityInvalid" @click="emit('retryArchive')">重试知识归档</button>
     </div>
 
     <dl v-if="existingReview && task.review_status !== 'pending'" class="review-result">
@@ -171,9 +184,9 @@ watch(
       </label>
       <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
       <div class="review-actions">
-        <button class="primary-button" type="button" data-test="approve" :disabled="submitting || task.diff_redaction_count > 0" @click="prepare('approved')">批准</button>
-        <button class="secondary-button" type="button" :disabled="submitting || task.diff_redaction_count > 0" @click="prepare('changes_requested')">要求修改</button>
-        <button class="secondary-button danger-button" type="button" :disabled="submitting || task.diff_redaction_count > 0" @click="prepare('rejected')">驳回</button>
+        <button class="primary-button" type="button" data-test="approve" :disabled="submitting || task.diff_redaction_count > 0 || auditIntegrityInvalid" @click="prepare('approved')">批准</button>
+        <button class="secondary-button" type="button" :disabled="submitting || task.diff_redaction_count > 0 || auditIntegrityInvalid" @click="prepare('changes_requested')">要求修改</button>
+        <button class="secondary-button danger-button" type="button" :disabled="submitting || task.diff_redaction_count > 0 || auditIntegrityInvalid" @click="prepare('rejected')">驳回</button>
       </div>
     </form>
 

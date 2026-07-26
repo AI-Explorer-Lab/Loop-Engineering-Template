@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from codex_loop.event_log import load_latest_integrity, read_events
 from codex_loop.models import CommandResult, TaskSpec, ValidationRound
 from codex_loop.state import StateStore
 
@@ -60,7 +61,8 @@ class FileRunMapper:
             if review_history
             else self._optional_json(run_dir / "review.json")
         )
-        events = self._events(run_dir / "events.jsonl")
+        events, event_integrity = self._events(run_dir / "events.jsonl")
+        latest_integrity = load_latest_integrity(run_dir / "audit")
         context = {
             "generation": self._optional_json(run_dir / "context/generation.json"),
             "evaluation": self._optional_json(run_dir / "context/evaluation.json"),
@@ -138,10 +140,18 @@ class FileRunMapper:
             workspace=workspace,
             permissions=permissions,
             audit_summary={
+                "integrity_status": event_integrity["status"],
                 "event_count": len(events),
+                "event_count_trusted": event_integrity["status"] == "valid",
+                "last_seq": event_integrity["last_seq"],
+                "events_sha256": event_integrity["events_sha256"],
+                "issue_count": event_integrity["issue_count"],
+                "checkpoint": latest_integrity.get("checkpoint"),
                 "denied_event_count": sum(
                     event.get("type") == "permission.denied" for event in events
                 ),
+                "integrity": event_integrity,
+                "latest_checkpoint": latest_integrity,
             },
             changed_files=list(changes.get("files", [])),
             codex_responses=self._responses(run_dir),
@@ -184,17 +194,9 @@ class FileRunMapper:
         return data if isinstance(data, dict) else {}
 
     @staticmethod
-    def _events(path: Path) -> list[dict[str, Any]]:
-        if not path.is_file():
-            return []
-        events: list[dict[str, Any]] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            value = json.loads(line)
-            if isinstance(value, dict):
-                events.append(value)
-        return events
+    def _events(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        events, inspection = read_events(path, strict=False)
+        return events, inspection.to_dict()
 
     @staticmethod
     def _responses(run_dir: Path) -> list[dict[str, Any]]:

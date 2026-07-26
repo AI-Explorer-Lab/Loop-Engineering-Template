@@ -43,6 +43,7 @@ class GitDeliveryService:
         *,
         review: ReviewRecord | None = None,
     ) -> dict[str, Any]:
+        existing_was_committed = False
         lock = self.store.acquire_active_lock(task_id)
         try:
             state = self.store.load_state(task_id)
@@ -61,13 +62,8 @@ class GitDeliveryService:
             run_dir = self.store.run_dir(task_id)
             record_path = run_dir / "delivery" / "commit.json"
             existing = self._optional_json(record_path)
+            existing_was_committed = existing.get("status") == "committed"
             worktree = Path(state.repo_root).resolve()
-            if existing and existing.get("status") == "committed":
-                self._verify_completed(existing, state, worktree)
-                state.delivery_status = DeliveryStatus.COMMITTED
-                self.store.save_state(state)
-                return existing
-
             audit = AuditRecorder(
                 run_dir,
                 worktree,
@@ -75,6 +71,24 @@ class GitDeliveryService:
                 inherited_baseline=state.inherited_baseline,
                 queue_task=task.queue_id is not None,
             )
+            if existing and existing.get("status") == "committed":
+                self._verify_completed(existing, state, worktree)
+                state.delivery_status = DeliveryStatus.COMMITTED
+                self.store.save_state(state)
+                integrity = audit.checkpoint(
+                    "commit-completed",
+                    bindings={
+                        "commit_sha": existing.get("commit_sha", ""),
+                        "reviewed_diff_sha256": existing.get(
+                            "reviewed_diff_sha256", ""
+                        ),
+                    },
+                )
+                if existing.get("audit_integrity") != integrity:
+                    existing["audit_integrity"] = integrity
+                    _atomic_write_json(record_path, existing)
+                return existing
+
             changes = self._read_json(run_dir / "changes" / "files.json")
             expected_diff_path, expected_cumulative_sha = self._expected_diff(
                 run_dir, changes, task.queue_id is not None
@@ -179,7 +193,14 @@ class GitDeliveryService:
                 intent, record_path, state, worktree, audit
             )
         except Exception as exc:
-            self._mark_failed(task_id, exc)
+            self._mark_failed(
+                task_id,
+                exc,
+                preserve_committed=(
+                    existing_was_committed
+                    and "events.jsonl integrity" in str(exc)
+                ),
+            )
             raise
         finally:
             self.store.release_active_lock(lock)
@@ -339,6 +360,15 @@ class GitDeliveryService:
                     "review_sha256": intent["review_sha256"],
                 },
             )
+        record["audit_integrity"] = audit.checkpoint(
+            "commit-completed",
+            bindings={
+                "commit_sha": commit_sha,
+                "reviewed_diff_sha256": intent["reviewed_diff_sha256"],
+                "review_sha256": intent["review_sha256"],
+            },
+        )
+        _atomic_write_json(record_path, record)
         return record
 
     def _verify_completed(
@@ -483,13 +513,24 @@ class GitDeliveryService:
             "committed_at": parts[4],
         }
 
-    def _mark_failed(self, task_id: str, error: Exception) -> None:
+    def _mark_failed(
+        self,
+        task_id: str,
+        error: Exception,
+        *,
+        preserve_committed: bool = False,
+    ) -> None:
         try:
             state = self.store.load_state(task_id)
         except Exception:
             return
-        state.delivery_status = DeliveryStatus.FAILED
         message = redact_sensitive_text(str(error) or type(error).__name__)[:2_000]
+        if preserve_committed:
+            state.delivery_status = DeliveryStatus.COMMITTED
+            state.last_error_summary = message
+            self.store.save_state(state)
+            return
+        state.delivery_status = DeliveryStatus.FAILED
         integrity_markers = (
             "unknown HEAD",
             "branch HEAD changed",

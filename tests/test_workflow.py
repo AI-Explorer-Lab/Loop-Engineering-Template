@@ -556,6 +556,9 @@ def test_frozen_context_and_four_layer_result_flow_through_workflow(
             "files": "changes/files.json",
             "diff": "changes/final.diff",
             "report": "report.md",
+            "audit_integrity": (
+                "audit/integrity-checkpoints/000020-run-finalized.json"
+            ),
         },
         "validation_evidence": "validation/evidence-round-01.json",
         "spec_evaluation": "evaluations/round-01/spec.json",

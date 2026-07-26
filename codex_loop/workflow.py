@@ -1332,6 +1332,41 @@ class OrchestrationWorkflow:
                     "diff_sha256": state.last_diff_sha256,
                 },
             )
+        evaluation = {}
+        evaluation_path = (
+            self.store.run_dir(task.task_id) / "evaluations" / "aggregate.json"
+        )
+        if evaluation_path.is_file():
+            loaded_evaluation = json.loads(
+                evaluation_path.read_text(encoding="utf-8")
+            )
+            if isinstance(loaded_evaluation, Mapping):
+                evaluation = dict(loaded_evaluation)
+        validation = evaluation.get("validation", {})
+        validation_evidence_path = (
+            validation.get("evidence_path", "")
+            if isinstance(validation, Mapping)
+            else ""
+        )
+        audit_integrity = audit.checkpoint(
+            "run-finalized",
+            bindings={
+                "final_diff_sha256": state.last_diff_sha256,
+                **(
+                    {"validation_evidence_path": validation_evidence_path}
+                    if validation_evidence_path
+                    else {}
+                ),
+                **{
+                    key: evaluation[key]
+                    for key in (
+                        "validation_evidence_sha256",
+                        "evaluation_input_sha256",
+                    )
+                    if evaluation.get(key)
+                },
+            },
+        )
         permissions_path = self.store.run_dir(task.task_id) / "permissions.json"
         permissions = (
             self.store.load_permissions(task.task_id)
@@ -1353,6 +1388,7 @@ class OrchestrationWorkflow:
             changes=changes,
             review=review,
             denied_event_count=audit.denied_event_count(),
+            audit_integrity=audit_integrity,
         )
         result.attach_evaluation_artifacts(self.store.run_dir(task.task_id))
         self.store.save_result(result)

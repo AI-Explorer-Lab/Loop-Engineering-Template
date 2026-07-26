@@ -139,6 +139,12 @@ async def stream_events(
                 after=cursor,
                 limit=200,
             )
+            if page["integrity"].get("status") != "valid":
+                yield (
+                    "event: integrity_error\n"
+                    f"data: {json.dumps(page['integrity'], ensure_ascii=False)}\n\n"
+                )
+                return
             for event in page["items"]:
                 cursor = int(event.get("seq", cursor))
                 yield f"id: {cursor}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"

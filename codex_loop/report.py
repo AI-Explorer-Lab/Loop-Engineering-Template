@@ -200,15 +200,21 @@ class ReportBuilder:
         changes: Mapping[str, Any] | None = None,
         review: ReviewRecord | None = None,
         denied_event_count: int = 0,
+        audit_integrity: Mapping[str, Any] | None = None,
     ) -> tuple[RunResult, str]:
         result = RunResult.from_run(task, state)
         if permissions is not None:
             result.permissions = dict(permissions)
+        integrity = dict(audit_integrity or {})
+        checkpoint_path = str(integrity.get("checkpoint_path", ""))
+        if checkpoint_path:
+            result.artifacts["audit_integrity"] = checkpoint_path
         report = self.render(
             result,
             changes=changes,
             review=review,
             denied_event_count=denied_event_count,
+            audit_integrity=integrity,
         )
         return result, report
 
@@ -225,8 +231,10 @@ class ReportBuilder:
         changes: Mapping[str, Any] | None = None,
         review: ReviewRecord | None = None,
         denied_event_count: int = 0,
+        audit_integrity: Mapping[str, Any] | None = None,
     ) -> str:
         change_data = dict(changes or {})
+        integrity = dict(audit_integrity or {})
         changed_file_rows = change_data.get("files", [])
         changed_files = [
             str(item.get("path"))
@@ -285,6 +293,15 @@ class ReportBuilder:
             "comment": review.comment if review else "待填写",
             "reviewed_diff_sha256": (
                 review.reviewed_diff_sha256 if review else "待填写"
+            ),
+            "audit_integrity_status": integrity.get("status", "未检查"),
+            "audit_integrity_checkpoint": integrity.get(
+                "checkpoint", "未生成"
+            ),
+            "audit_event_count": integrity.get("event_count", "未知"),
+            "audit_events_sha256": integrity.get("events_sha256", "未生成"),
+            "audit_integrity_artifact": integrity.get(
+                "checkpoint_path", "未生成"
             ),
         }
         return self.renderer.render("final_report.md", values)

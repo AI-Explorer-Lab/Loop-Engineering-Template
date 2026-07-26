@@ -138,6 +138,13 @@ class ReviewService:
                 },
                 source="reviewer",
             )
+            audit_integrity = audit.checkpoint(
+                "review-recorded",
+                bindings={
+                    "decision": review.decision.value,
+                    "reviewed_diff_sha256": review.reviewed_diff_sha256,
+                },
+            )
             state.review_status = review.decision
             state.delivery_status = (
                 DeliveryStatus.COMMIT_PENDING
@@ -159,6 +166,7 @@ class ReviewService:
                 changes=changes,
                 review=review,
                 denied_event_count=audit.denied_event_count(),
+                audit_integrity=audit_integrity,
             )
             self.store.save_result(result)
             self.store.save_report(task_id, report)

@@ -87,7 +87,12 @@ function task(status: TaskData["status"], overrides: Partial<TaskData> = {}): Ta
     diff_url: status === "success" ? "/api/tasks/task-1/diff" : null,
     workspace: { base_commit: "a".repeat(40), task_branch: "codex/task-1", worktree: ".codex-orchestrator/worktrees/task-1" },
     permissions: { effective: { verified: true, network: "disabled" } },
-    audit_summary: { event_count: 12, denied_event_count: 0 },
+    audit_summary: {
+      integrity_status: "valid",
+      event_count: 12,
+      event_count_trusted: true,
+      denied_event_count: 0,
+    },
     changed_files: [{ path: "src/filter.ts", status: "modified", additions: 4, deletions: 1 }],
     codex_responses: [{ turn_number: 1, response: "Implemented." }],
     final_diff_sha256: "b".repeat(64),
@@ -175,7 +180,20 @@ describe("App workbench", () => {
       { project_id: "default", name: "Accounting-Software", repo_root: "/repo", is_default: true, active_identifier: null, knowledge_actor_id: "zhangsan" },
     ]);
     platformApi.getNotifications.mockResolvedValue([]);
-    platformApi.getEvents.mockResolvedValue({ items: [], next_cursor: 0, terminal: false });
+    platformApi.getEvents.mockResolvedValue({
+      items: [],
+      next_cursor: 0,
+      terminal: false,
+      integrity: {
+        status: "valid",
+        event_count: 0,
+        first_seq: null,
+        last_seq: null,
+        events_sha256: "e".repeat(64),
+        issue_count: 0,
+        issues: [],
+      },
+    });
     platformApi.getLogs.mockResolvedValue([]);
     platformApi.eventStreamUrl.mockReturnValue("/events");
     platformApi.getNotificationSettings.mockResolvedValue({ in_app: true, browser: true, email_configured: false, webhook_configured: false });
@@ -306,6 +324,46 @@ describe("App workbench", () => {
     });
     expect(wrapper.get('[data-test="review-panel"]').text()).toContain("Local Reviewer");
     wrapper.unmount();
+  });
+
+  it("blocks review and hides an invalid event timeline", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    taskApi.getTask.mockResolvedValue(task("success", {
+      audit_summary: {
+        integrity_status: "invalid",
+        event_count: 2,
+        event_count_trusted: false,
+        denied_event_count: 0,
+        issue_count: 1,
+      },
+    }));
+    platformApi.getEvents.mockResolvedValue({
+      items: [],
+      next_cursor: 0,
+      terminal: true,
+      integrity: {
+        status: "invalid",
+        event_count: 2,
+        first_seq: 1,
+        last_seq: 1,
+        events_sha256: "f".repeat(64),
+        issue_count: 1,
+        issues: [{ type: "duplicate_sequence", line: 2 }],
+      },
+    });
+
+    const review = await mountAt("/review");
+    expect(review.wrapper.get('[data-test="audit-integrity-block"]').text()).toContain(
+      "不能在这里批准、Commit 或重试 Archive",
+    );
+    expect(review.wrapper.get('[data-test="approve"]').attributes("disabled")).toBeDefined();
+    await review.wrapper.get('[data-test="approve"]').trigger("click");
+    expect(taskApi.submitTaskReview).not.toHaveBeenCalled();
+    review.wrapper.unmount();
+
+    const monitor = await mountAt("/monitor");
+    expect(monitor.wrapper.text()).toContain("事件时间线不可信，已停止展示");
+    monitor.wrapper.unmount();
   });
 
   it("polls an approved delivery until archiving reaches a terminal state", async () => {
