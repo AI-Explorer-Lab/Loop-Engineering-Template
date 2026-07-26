@@ -16,6 +16,7 @@ import time
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 from uuid import uuid4
 
+from .event_log import append_event as append_log_event
 from .models import (
     QUEUE_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -406,40 +407,22 @@ class StateStore:
         """Append a redacted event when no workflow AuditRecorder is active."""
 
         path = self.run_dir(task_id) / "events.jsonl"
-        sequence = 1
-        if path.is_file():
-            sequence = (
-                len(
-                    [
-                        line
-                        for line in path.read_text(encoding="utf-8").splitlines()
-                        if line
-                    ]
-                )
-                + 1
-            )
-        event = redact_sensitive_data(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "seq": sequence,
-                "timestamp": utc_now_iso(),
-                "source": source,
-                "type": event_type,
-                "turn_number": None,
-                "round_number": None,
-                "payload": dict(payload or {}),
-                "redacted": True,
-            }
+        return append_log_event(
+            path,
+            lambda sequence: redact_sensitive_data(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "seq": sequence,
+                    "timestamp": utc_now_iso(),
+                    "source": source,
+                    "type": event_type,
+                    "turn_number": None,
+                    "round_number": None,
+                    "payload": dict(payload or {}),
+                    "redacted": True,
+                }
+            ),
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n"
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            os.write(descriptor, line.encode("utf-8"))
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        return event
 
     def save_result(self, result: RunResult) -> Path:
         path = self.run_dir(result.task_id) / "result.json"
@@ -825,27 +808,18 @@ class QueueStore:
         payload: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         path = self.queue_dir(queue_id) / "events.jsonl"
-        sequence = 1
-        if path.is_file():
-            sequence = len([line for line in path.read_text().splitlines() if line]) + 1
-        event = redact_sensitive_data(
-            {
-                "schema_version": 2,
-                "seq": sequence,
-                "timestamp": utc_now_iso(),
-                "type": event_type,
-                "payload": dict(payload or {}),
-            }
+        return append_log_event(
+            path,
+            lambda sequence: redact_sensitive_data(
+                {
+                    "schema_version": 2,
+                    "seq": sequence,
+                    "timestamp": utc_now_iso(),
+                    "type": event_type,
+                    "payload": dict(payload or {}),
+                }
+            ),
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n"
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            os.write(descriptor, line.encode("utf-8"))
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        return event
 
     def cumulative_diff_path(self, queue_id: str) -> Path:
         return self.queue_dir(queue_id) / "changes/cumulative.diff"

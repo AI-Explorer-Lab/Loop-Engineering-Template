@@ -43,6 +43,15 @@ const deliveryLabels: Record<TaskData["delivery_status"], string> = {
 
 const statusLabel = computed(() => labels[props.task.status]);
 const reviewLabel = computed(() => reviewLabels[props.task.review_status]);
+const auditIntegrityLabel = computed(() => {
+  const status = props.task.audit_summary.integrity_status;
+  if (status === "invalid") return "无效（流程阻断）";
+  if (status === "valid") {
+    const checkpoint = props.task.audit_summary.checkpoint;
+    return checkpoint ? `有效 · ${String(checkpoint)}` : "结构有效 · 尚无检查点";
+  }
+  return "尚未检查";
+});
 const deliveryProgress = computed(() =>
   deliveryProgressFor(
     props.task,
@@ -119,9 +128,14 @@ function formatTime(value: string | null): string {
         <div v-if="!task.legacy"><dt>权限核验</dt><dd>{{ effectivePermissions.verified ? "已通过" : "未通过" }}</dd></div>
         <div v-if="!task.legacy"><dt>网络</dt><dd>{{ effectivePermissions.network || "disabled" }}</dd></div>
         <div v-if="!task.legacy"><dt>越权拒绝</dt><dd>{{ task.audit_summary.denied_event_count || 0 }} 次</dd></div>
+        <div v-if="!task.legacy"><dt>审计日志</dt><dd>{{ auditIntegrityLabel }}</dd></div>
       </dl>
     </details>
 
+    <div v-if="task.audit_summary.integrity_status === 'invalid'" class="callout danger-callout">
+      <strong>审计日志无效</strong>
+      <p>事件序号或 JSONL 结构不连续。业务状态保持不变，但 Review、Commit 和 Archive 已阻断。</p>
+    </div>
     <div v-if="task.history_warning" class="callout warning-callout">
       <strong>历史记录不完整</strong><p>{{ task.history_warning }}</p>
     </div>

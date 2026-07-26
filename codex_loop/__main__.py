@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from .event_log import load_latest_integrity, read_events
 from .models import (
     DeliveryStatus,
     InfrastructureError,
@@ -488,16 +489,14 @@ def _print_run_metadata(store: StateStore, task_id: str) -> None:
             permissions_path.read_text(encoding="utf-8")
         )
     if events_path.is_file():
-        events = [
-            json.loads(line)
-            for line in events_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        events, inspection = read_events(events_path, strict=False)
         data["audit"] = {
             "event_count": len(events),
             "denied_event_count": sum(
                 event.get("type") == "permission.denied" for event in events
             ),
+            "integrity": inspection.to_dict(),
+            "latest_checkpoint": load_latest_integrity(run_dir / "audit"),
         }
     print(json.dumps(data, ensure_ascii=False, indent=2))
 

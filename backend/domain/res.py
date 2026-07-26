@@ -59,6 +59,7 @@ class EventPageData(BaseModel):
     items: list[dict[str, Any]]
     next_cursor: int
     terminal: bool
+    integrity: dict[str, Any]
 
 
 class LogData(BaseModel):

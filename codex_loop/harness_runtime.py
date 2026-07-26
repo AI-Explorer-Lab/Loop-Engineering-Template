@@ -177,11 +177,28 @@ class HarnessRuntime:
             ),
             registry_path=self.mcp_registry,
         )
-        return coordinator.archive(task_id, store=run_store, archive_context=context)
+        return coordinator.archive(
+            task_id,
+            audit=audit,
+            store=run_store,
+            archive_context=context,
+        )
 
     def retry_archive(
         self, task_id: str, *, store: StateStore | None = None
     ) -> dict[str, Any]:
+        run_store = store or StateStore(self.repo_root)
+        task = run_store.load_task(task_id)
+        state = run_store.load_state(task_id)
+        run_dir = run_store.run_dir(task_id)
+        audit = AuditRecorder(
+            run_dir,
+            state.repo_root,
+            state.base_commit,
+            inherited_baseline=state.inherited_baseline,
+            queue_task=task.queue_id is not None,
+        )
+        sink = lambda event_type, payload: audit.append(event_type, payload)
         assembler = self.context_assembler()
         coordinator = ArchiveCoordinator(
             self.repo_root,
@@ -193,10 +210,14 @@ class HarnessRuntime:
                 self.repo_root,
                 aliases=assembler.knowledge.aliases(),
             ),
-            archive_client=LocalMcpClient(self.mcp_registry, mode="archive"),
+            archive_client=LocalMcpClient(
+                self.mcp_registry,
+                mode="archive",
+                event_sink=sink,
+            ),
             registry_path=self.mcp_registry,
         )
-        return coordinator.retry(task_id, store=store)
+        return coordinator.retry(task_id, audit=audit, store=run_store)
 
     def capabilities(self) -> dict[str, Any]:
         read_client = LocalMcpClient(self.mcp_registry, mode="read")

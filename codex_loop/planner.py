@@ -14,6 +14,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .context import ContextSnapshot
+from .event_log import append_event as append_log_event
 from .models import (
     TaskQueueSpec,
     TaskSpec,
@@ -349,34 +350,19 @@ def append_plan_event(
     """Append one redacted event to a draft or confirmed Plan timeline."""
 
     path = Path(artifact_root) / "events.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sequence = 1
-    if path.is_file():
-        sequence = len(
-            [
-                line
-                for line in path.read_text(encoding="utf-8").splitlines()
-                if line
-            ]
-        ) + 1
-    event = redact_sensitive_data(
-        {
-            "schema_version": 1,
-            "seq": sequence,
-            "timestamp": utc_now_iso(),
-            "source": "orchestrator",
-            "type": str(event_type),
-            "payload": dict(payload),
-        }
+    return append_log_event(
+        path,
+        lambda sequence: redact_sensitive_data(
+            {
+                "schema_version": 1,
+                "seq": sequence,
+                "timestamp": utc_now_iso(),
+                "source": "orchestrator",
+                "type": str(event_type),
+                "payload": dict(payload),
+            }
+        ),
     )
-    line = json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n"
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        os.write(descriptor, line.encode("utf-8"))
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    return event
 
 
 def _source_sha(requirement: str, criteria: Mapping[str, str]) -> str:

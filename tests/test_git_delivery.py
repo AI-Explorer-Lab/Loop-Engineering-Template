@@ -20,6 +20,7 @@ from codex_loop.mcp_client import McpCallError
 from codex_loop.memory import MediumTermMemory
 from codex_loop.models import (
     DeliveryStatus,
+    InfrastructureError,
     RunResult,
     RunStatus,
     TaskSpec,
@@ -560,6 +561,18 @@ def archive_coordinator(
     )
 
 
+def archive_audit(store: StateStore, task_id: str) -> AuditRecorder:
+    task = store.load_task(task_id)
+    state = store.load_state(task_id)
+    return AuditRecorder(
+        store.run_dir(task_id),
+        state.repo_root,
+        state.base_commit,
+        inherited_baseline=state.inherited_baseline,
+        queue_task=task.queue_id is not None,
+    )
+
+
 def test_archiver_persists_local_summary_before_idempotent_outbox(
     repository: Path,
 ) -> None:
@@ -572,9 +585,11 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
     role = ArchiveRole()
     client = ArchiveClient()
     coordinator = archive_coordinator(repository, role, client)
+    audit = archive_audit(store, "archive-success")
 
     completed = coordinator.archive(
         "archive-success",
+        audit=audit,
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -585,6 +600,7 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
 
     run_dir = store.run_dir("archive-success")
     packet = (run_dir / "archive" / "packet.json").read_text(encoding="utf-8")
+    packet_data = json.loads(packet)
     assert completed["status"] == "completed"
     assert (
         store.load_state("archive-success").delivery_status is DeliveryStatus.ARCHIVED
@@ -595,12 +611,14 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
     ]
     assert "full command logs" in packet
     assert "diff --git" not in packet
+    assert packet_data["audit_integrity"]["status"] == "valid"
     assert (
         repository / ".codex-orchestrator/memory/run_summaries/archive-success.json"
     ).is_file()
     calls_before_retry = len(client.calls)
     coordinator.archive(
         "archive-success",
+        audit=audit,
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -610,6 +628,12 @@ def test_archiver_persists_local_summary_before_idempotent_outbox(
     )
     assert len(client.calls) == calls_before_retry
     assert role.calls == 1
+    events = [
+        json.loads(line)
+        for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum(item["type"] == "archive.queued" for item in events) == 1
+    assert sum(item["type"] == "archive.completed" for item in events) == 1
 
 
 def test_archive_packet_preserves_evaluation_binding_without_command_logs(
@@ -650,9 +674,11 @@ def test_archive_packet_preserves_evaluation_binding_without_command_logs(
         role,
         ArchiveClient(),
     )
+    audit = archive_audit(store, "archive-evaluation-binding")
 
     coordinator.archive(
         "archive-evaluation-binding",
+        audit=audit,
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -671,6 +697,7 @@ def test_archive_packet_preserves_evaluation_binding_without_command_logs(
     first_packet = packet_text
     coordinator.archive(
         "archive-evaluation-binding",
+        audit=audit,
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -696,6 +723,7 @@ def test_archiver_routes_candidates_without_preallocating_knowledge_ids(
 
     completed = archive_coordinator(repository, role, client).archive(
         "archive-layered",
+        audit=archive_audit(store, "archive-layered"),
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -730,9 +758,11 @@ def test_archive_write_failure_does_not_rollback_commit_and_retries_only_outbox(
     role = ArchiveRole()
     client = ArchiveClient(fail=True)
     coordinator = archive_coordinator(repository, role, client)
+    audit = archive_audit(store, "archive-retry")
 
     failed = coordinator.archive(
         "archive-retry",
+        audit=audit,
         store=store,
         archive_context=ContextSnapshot(
             stage="archive",
@@ -746,7 +776,64 @@ def test_archive_write_failure_does_not_rollback_commit_and_retries_only_outbox(
     assert git(worktree, "rev-parse", "HEAD") == commit["commit_sha"]
     assert role.calls == 1
     client.fail = False
-    completed = coordinator.retry("archive-retry", store=store)
+    completed = coordinator.retry("archive-retry", audit=audit, store=store)
     assert completed["status"] == "completed"
     assert store.load_state("archive-retry").delivery_status is DeliveryStatus.ARCHIVED
     assert role.calls == 1
+    events = [
+        json.loads(line)
+        for line in (
+            store.run_dir("archive-retry") / "events.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum(item["type"] == "knowledge.write_failed" for item in events) == 1
+    assert sum(item["type"] == "archive.completed" for item in events) == 1
+
+
+def test_invalid_historical_log_blocks_redelivery_without_rewriting_commit_state(
+    repository: Path,
+) -> None:
+    store, _worktree, _sha = prepare_approved_run(
+        repository,
+        task_id="committed-invalid-history",
+        changes={"one.txt": "committed before corruption\n"},
+    )
+    delivery = GitDeliveryService(repository, store=store)
+    commit = delivery.deliver("committed-invalid-history")
+    events_path = store.run_dir("committed-invalid-history") / "events.jsonl"
+    original = events_path.read_bytes()
+    events_path.write_bytes(
+        original
+        + json.dumps(
+            {
+                "schema_version": 2,
+                "seq": 1,
+                "timestamp": "2026-07-25T00:00:00Z",
+                "type": "duplicate",
+                "payload": {},
+            }
+        ).encode("utf-8")
+        + b"\n"
+    )
+    corrupted = events_path.read_bytes()
+
+    with pytest.raises(InfrastructureError, match="integrity check failed"):
+        delivery.deliver("committed-invalid-history")
+
+    state = store.load_state("committed-invalid-history")
+    record = json.loads(
+        (
+            store.run_dir("committed-invalid-history") / "delivery/commit.json"
+        ).read_text(encoding="utf-8")
+    )
+    integrity = json.loads(
+        (
+            store.run_dir("committed-invalid-history")
+            / "audit/event-log-integrity.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert events_path.read_bytes() == corrupted
+    assert state.delivery_status is DeliveryStatus.COMMITTED
+    assert record["status"] == "committed"
+    assert record["commit_sha"] == commit["commit_sha"]
+    assert integrity["status"] == "invalid"

@@ -249,6 +249,18 @@ export interface EventPageData {
   items: EventRecord[];
   next_cursor: number;
   terminal: boolean;
+  integrity: EventIntegrityData;
+}
+
+export interface EventIntegrityData {
+  status: "valid" | "invalid";
+  event_count: number;
+  first_seq: number | null;
+  last_seq: number | null;
+  events_sha256: string;
+  issue_count: number;
+  issues: Array<Record<string, unknown>>;
+  latest_checkpoint?: Record<string, unknown>;
 }
 
 export interface LogData {

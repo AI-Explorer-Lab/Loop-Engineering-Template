@@ -12,6 +12,7 @@ from threading import RLock
 from typing import Any, Iterable
 from urllib.request import Request, urlopen
 
+from codex_loop.event_log import load_latest_integrity, read_events
 from codex_loop.state import QueueStore, StateStore, redact_sensitive_text
 
 from ..exceptions.business_exception import BusinessException
@@ -112,22 +113,25 @@ class PlatformService:
         context = self.registry.get(project_id)
         root = self._artifact_root(context, kind, identifier)
         path = root / "events.jsonl"
-        events: list[dict[str, Any]] = []
-        if path.is_file():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                value = json.loads(line)
-                if not isinstance(value, dict) or int(value.get("seq", 0)) <= after:
-                    continue
-                events.append(value)
-                if len(events) >= limit:
-                    break
+        persisted_events, inspection = read_events(path, strict=False)
+        events = (
+            [
+                value
+                for value in persisted_events
+                if int(value.get("seq", 0)) > after
+            ][:limit]
+            if inspection.valid
+            else []
+        )
         next_cursor = int(events[-1].get("seq", after)) if events else after
         return {
             "items": events,
             "next_cursor": next_cursor,
             "terminal": self._is_terminal(context, kind, identifier),
+            "integrity": {
+                **inspection.to_dict(),
+                "latest_checkpoint": load_latest_integrity(root / "audit"),
+            },
         }
 
     def logs(

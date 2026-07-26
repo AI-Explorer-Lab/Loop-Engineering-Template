@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -140,6 +141,54 @@ def test_projects_history_events_logs_and_notifications_share_persisted_state(
     }
     assert metrics.json()["data"]["project_id"] == "accounting"
     assert metrics.json()["data"]["completed_tasks"] == 1
+
+
+def test_invalid_event_history_is_reported_without_streaming_partial_facts(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "accounting"
+    repo_root.mkdir()
+    task = _persist_completed_task(repo_root)
+    events_path = (
+        repo_root
+        / ".codex-orchestrator"
+        / "runs"
+        / task.task_id
+        / "events.jsonl"
+    )
+    events_path.write_text(
+        events_path.read_text(encoding="utf-8")
+        + json.dumps(
+            {
+                "schema_version": 2,
+                "seq": 1,
+                "timestamp": "2026-07-25T00:00:00Z",
+                "type": "duplicate",
+                "payload": {},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    app = create_app(config=_config(repo_root), validate_config=False)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        events = client.get(
+            f"/api/history/task/{task.task_id}/events",
+            headers={"X-Project-ID": "accounting"},
+        )
+        stream = client.get(
+            f"/api/history/task/{task.task_id}/stream",
+            params={"project_id": "accounting"},
+        )
+
+    data = events.json()["data"]
+    assert events.status_code == 200
+    assert data["items"] == []
+    assert data["integrity"]["status"] == "invalid"
+    assert data["integrity"]["issues"][0]["type"] == "duplicate_sequence"
+    assert "event: integrity_error" in stream.text
+    assert "event: end" not in stream.text
 
 
 def test_unknown_project_is_rejected_before_artifact_lookup(tmp_path: Path) -> None:

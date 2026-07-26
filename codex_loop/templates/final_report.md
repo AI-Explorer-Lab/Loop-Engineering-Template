@@ -24,6 +24,13 @@
 - Turn：{{turn_count}}
 - Prompt/回复/事件：{{artifact_links}}
 
+## 审计完整性
+- 状态：{{audit_integrity_status}}
+- 检查点：{{audit_integrity_checkpoint}}
+- 事件数：{{audit_event_count}}
+- Events SHA-256：{{audit_events_sha256}}
+- 快照：{{audit_integrity_artifact}}
+
 ## 验证
 {{validation_rounds}}
 

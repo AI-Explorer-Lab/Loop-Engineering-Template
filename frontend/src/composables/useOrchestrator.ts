@@ -49,6 +49,7 @@ import {
 } from "../api/tasks";
 import { ApiError, PROJECT_STORAGE_KEY } from "../api/http";
 import type {
+  EventIntegrityData,
   EventRecord,
   HarnessCapabilitiesData,
   HarnessMetricsData,
@@ -258,6 +259,7 @@ export function createOrchestrator() {
   const queueReport = ref("");
   const queueDiff = ref("");
   const events = ref<EventRecord[]>([]);
+  const eventIntegrity = ref<EventIntegrityData | null>(null);
   const eventCursor = ref(0);
   const logs = ref<LogData[]>([]);
   const selectedLogId = ref("");
@@ -353,6 +355,7 @@ export function createOrchestrator() {
     queueReport.value = "";
     queueDiff.value = "";
     events.value = [];
+    eventIntegrity.value = null;
     eventCursor.value = 0;
     logs.value = [];
     selectedLogId.value = "";
@@ -423,6 +426,7 @@ export function createOrchestrator() {
       const known = new Set(events.value.map((event) => event.seq));
       events.value.push(...page.items.filter((event) => !known.has(event.seq)));
       eventCursor.value = page.next_cursor;
+      eventIntegrity.value = page.integrity;
       logs.value = availableLogs;
     } catch (error) {
       recordError(error, "事件或日志读取失败。");
@@ -450,6 +454,24 @@ export function createOrchestrator() {
       }
     };
     eventSource.addEventListener("end", closeEventStream);
+    eventSource.addEventListener("integrity_error", (message) => {
+      try {
+        eventIntegrity.value = JSON.parse(
+          (message as MessageEvent<string>).data,
+        ) as EventIntegrityData;
+      } catch {
+        eventIntegrity.value = {
+          status: "invalid",
+          event_count: events.value.length,
+          first_seq: events.value[0]?.seq ?? null,
+          last_seq: events.value[events.value.length - 1]?.seq ?? null,
+          events_sha256: "",
+          issue_count: 1,
+          issues: [{ type: "unreadable_integrity_error" }],
+        };
+      }
+      closeEventStream();
+    });
     eventSource.onerror = () => closeEventStream();
   }
 
@@ -938,6 +960,7 @@ export function createOrchestrator() {
     queueReport,
     queueDiff,
     events,
+    eventIntegrity,
     logs,
     selectedLogId,
     logContent,

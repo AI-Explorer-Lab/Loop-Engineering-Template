@@ -163,6 +163,7 @@ class ArchiveCoordinator:
         self,
         task_id: str,
         *,
+        audit: AuditRecorder,
         store: StateStore | None = None,
         archive_context: ContextSnapshot,
     ) -> dict[str, Any]:
@@ -184,33 +185,42 @@ class ArchiveCoordinator:
             raise InfrastructureError("archive packet has no committed delivery record")
         outbox_path = run_dir / "archive" / "outbox.json"
         if outbox_path.is_file():
-            return self.retry(task_id, store=run_store)
+            return self.retry(task_id, audit=audit, store=run_store)
         review = (
             run_store.load_latest_review(task_id)
             if task.queue_id is not None
             else run_store.load_review(task_id)
         )
-        audit = AuditRecorder(
-            run_dir,
-            state.repo_root,
-            state.base_commit,
-            inherited_baseline=state.inherited_baseline,
-            queue_task=task.queue_id is not None,
+        archive_integrity = audit.checkpoint(
+            "archive-ready",
+            bindings={
+                "commit_sha": commit["commit_sha"],
+                "reviewed_diff_sha256": review.reviewed_diff_sha256,
+                **self._evaluation_bindings(run_dir),
+            },
         )
         state.delivery_status = DeliveryStatus.ARCHIVE_PENDING
         run_store.save_state(state)
-        packet = self._packet(run_dir, task, state, review.to_dict(), commit)
+        packet = self._packet(
+            run_dir,
+            task,
+            state,
+            review.to_dict(),
+            commit,
+            archive_integrity,
+        )
         archive_dir = run_dir / "archive"
         _atomic_write_json(archive_dir / "context.json", archive_context.to_dict())
         _atomic_write_json(archive_dir / "packet.json", packet)
-        if not audit.has_event("archive.queued"):
-            audit.append(
-                "archive.queued",
-                {
-                    "commit_sha": commit["commit_sha"],
-                    "packet_sha256": _json_sha(packet),
-                },
-            )
+        audit.append_once(
+            "archive.queued",
+            {
+                "commit_sha": commit["commit_sha"],
+                "packet_sha256": _json_sha(packet),
+                "integrity_snapshot_sha256": archive_integrity["snapshot_sha256"],
+            },
+            identity={"commit_sha": commit["commit_sha"]},
+        )
         role_result = self.role_runner.run(
             role="archiver",
             prompt=json.dumps(
@@ -295,35 +305,23 @@ class ArchiveCoordinator:
         )
         _atomic_write_json(archive_dir / "outbox.json", outbox)
         try:
-            completed = self.retry(task_id, store=run_store)
-        except Exception as exc:
-            state = run_store.load_state(task_id)
-            state.delivery_status = DeliveryStatus.FAILED
-            state.last_error_summary = str(exc)
-            run_store.save_state(state)
-            audit.append(
-                "knowledge.write_failed",
-                {"error": str(exc), "commit_sha": commit["commit_sha"]},
-                redacted=True,
-            )
+            completed = self.retry(task_id, audit=audit, store=run_store)
+        except McpCallError:
             return self._read_json(archive_dir / "outbox.json")
-        if completed["status"] == "completed":
-            audit.append(
-                "archive.completed",
-                {
-                    "commit_sha": commit["commit_sha"],
-                    "candidate_count": len(candidates),
-                },
-            )
         return completed
 
     def retry(
-        self, task_id: str, *, store: StateStore | None = None
+        self,
+        task_id: str,
+        *,
+        audit: AuditRecorder,
+        store: StateStore | None = None,
     ) -> dict[str, Any]:
         run_store = store or StateStore(self.repo_root)
         run_dir = run_store.run_dir(task_id)
         path = run_dir / "archive" / "outbox.json"
         outbox = self._read_json(path)
+        commit_sha = str(outbox.get("commit_sha", ""))
         state = run_store.load_state(task_id)
         state.delivery_status = DeliveryStatus.ARCHIVE_PENDING
         run_store.save_state(state)
@@ -344,6 +342,27 @@ class ArchiveCoordinator:
                 state.delivery_status = DeliveryStatus.FAILED
                 state.last_error_summary = str(exc)
                 run_store.save_state(state)
+                audit.append(
+                    "knowledge.write_failed",
+                    {
+                        "error": str(exc),
+                        "commit_sha": commit_sha,
+                        "idempotency_key": item.get("idempotency_key", ""),
+                        "tool": item.get("tool", ""),
+                        "attempt": item["attempts"],
+                    },
+                    redacted=True,
+                )
+                audit.checkpoint(
+                    "archive-failed",
+                    bindings={
+                        "commit_sha": commit_sha,
+                        "outbox_status": "failed",
+                        "failed_idempotency_key": item.get(
+                            "idempotency_key", ""
+                        ),
+                    },
+                )
                 raise
             item["status"] = "completed"
             item["result"] = result
@@ -354,12 +373,29 @@ class ArchiveCoordinator:
         outbox["status"] = "completed"
         outbox["completed_at"] = utc_now_iso()
         _atomic_write_json(path, outbox)
+        summary_path = run_dir / "archive" / "summary.json"
+        summary: dict[str, Any] = {}
+        if summary_path.is_file():
+            summary = self._read_json(summary_path)
+        audit.append_once(
+            "archive.completed",
+            {
+                "commit_sha": commit_sha,
+                "candidate_count": int(summary.get("candidate_count", 0)),
+            },
+            identity={"commit_sha": commit_sha},
+        )
+        audit.checkpoint(
+            "archive-completed",
+            bindings={
+                "commit_sha": commit_sha,
+                "outbox_status": "completed",
+            },
+        )
         state.delivery_status = DeliveryStatus.ARCHIVED
         state.last_error_summary = ""
         run_store.save_state(state)
-        summary_path = run_dir / "archive" / "summary.json"
-        if summary_path.is_file():
-            summary = self._read_json(summary_path)
+        if summary:
             summary["delivery_status"] = DeliveryStatus.ARCHIVED.value
             _atomic_write_json(summary_path, summary)
         return outbox
@@ -371,6 +407,7 @@ class ArchiveCoordinator:
         state: Any,
         review: Mapping[str, Any],
         commit: Mapping[str, Any],
+        audit_integrity: Mapping[str, Any],
     ) -> dict[str, Any]:
         changes = self._read_json(run_dir / "changes" / "files.json")
         evaluation = self._optional_json(run_dir / "evaluations" / "aggregate.json")
@@ -421,6 +458,7 @@ class ArchiveCoordinator:
                 "validation": failure_summaries,
                 "changed_files": list(changes.get("files", [])),
                 "evaluation": evaluation,
+                "audit_integrity": dict(audit_integrity),
                 "review": {
                     "reviewer": review.get("reviewer"),
                     "comment": review.get("comment"),
@@ -441,6 +479,25 @@ class ArchiveCoordinator:
                 "created_at": utc_now_iso(),
             }
         )
+
+    @staticmethod
+    def _evaluation_bindings(run_dir: Path) -> dict[str, Any]:
+        evaluation = ArchiveCoordinator._optional_json(
+            run_dir / "evaluations" / "aggregate.json"
+        )
+        bindings = {
+            key: evaluation[key]
+            for key in (
+                "validation_evidence_sha256",
+                "final_diff_sha256",
+                "evaluation_input_sha256",
+            )
+            if evaluation.get(key)
+        }
+        validation = evaluation.get("validation", {})
+        if isinstance(validation, Mapping) and validation.get("evidence_path"):
+            bindings["validation_evidence_path"] = validation["evidence_path"]
+        return bindings
 
     def _validated_candidates(
         self,

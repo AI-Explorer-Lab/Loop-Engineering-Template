@@ -10,6 +10,13 @@ import shlex
 import subprocess
 from typing import Any, Mapping
 
+from .event_log import (
+    append_event as append_log_event,
+    append_event_once as append_log_event_once,
+    inspect_event_log,
+    persist_integrity_checkpoint,
+    read_events,
+)
 from .models import AuditEvent, InfrastructureError, SCHEMA_VERSION
 from .policy import ExecutionPolicy
 from .state import (
@@ -38,7 +45,22 @@ class AuditRecorder:
         self.inherited_baseline = bool(inherited_baseline)
         self.queue_task = bool(queue_task)
         self.events_path = self.run_dir / "events.jsonl"
-        self._next_seq = self._load_next_seq()
+        if self.events_path.is_file():
+            _events, inspection = read_events(self.events_path, strict=False)
+            if not inspection.valid:
+                persist_integrity_checkpoint(
+                    self.events_path,
+                    audit_dir=self.run_dir / "audit",
+                    checkpoint="preflight-invalid",
+                )
+                first = inspection.issues[0] if inspection.issues else {}
+                raise InfrastructureError(
+                    "events.jsonl integrity check failed "
+                    f"(path={self.events_path}, "
+                    f"issue_count={len(inspection.issues)}, "
+                    f"first_issue={first.get('type', 'unknown')}, "
+                    f"line={first.get('line', 'unknown')})"
+                )
 
     def append(
         self,
@@ -50,30 +72,92 @@ class AuditRecorder:
         round_number: int | None = None,
         redacted: bool = False,
     ) -> AuditEvent:
-        event = AuditEvent(
-            seq=self._next_seq,
-            source=source,
-            type=event_type,
-            payload=dict(payload or {}),
-            turn_number=turn_number,
-            round_number=round_number,
-            redacted=redacted,
-        )
-        safe = redact_sensitive_data(event.to_dict())
-        line = json.dumps(safe, ensure_ascii=False, sort_keys=True) + "\n"
-        self.events_path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(
-            self.events_path,
-            os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-            0o600,
-        )
-        try:
-            os.write(descriptor, line.encode("utf-8"))
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        self._next_seq += 1
+        created: AuditEvent | None = None
+
+        def factory(seq: int) -> Mapping[str, Any]:
+            nonlocal created
+            created = AuditEvent(
+                seq=seq,
+                source=source,
+                type=event_type,
+                payload=dict(payload or {}),
+                turn_number=turn_number,
+                round_number=round_number,
+                redacted=redacted,
+            )
+            return redact_sensitive_data(created.to_dict())
+
+        append_log_event(self.events_path, factory)
+        if created is None:  # pragma: no cover - append contract guarantees this
+            raise InfrastructureError("audit event was not constructed")
+        event = created
         return event
+
+    def append_once(
+        self,
+        event_type: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        source: str = "orchestrator",
+        turn_number: int | None = None,
+        round_number: int | None = None,
+        redacted: bool = False,
+        identity: Mapping[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Append one semantic event atomically unless it already exists."""
+
+        identity_values = dict(identity or {})
+
+        def factory(seq: int) -> Mapping[str, Any]:
+            event = AuditEvent(
+                seq=seq,
+                source=source,
+                type=event_type,
+                payload=dict(payload or {}),
+                turn_number=turn_number,
+                round_number=round_number,
+                redacted=redacted,
+            )
+            return redact_sensitive_data(event.to_dict())
+
+        def matches(event: Mapping[str, Any]) -> bool:
+            if event.get("type") != event_type:
+                return False
+            if turn_number is not None and event.get("turn_number") != turn_number:
+                return False
+            if round_number is not None and event.get("round_number") != round_number:
+                return False
+            event_payload = event.get("payload", {})
+            if not isinstance(event_payload, Mapping):
+                return not identity_values
+            return all(event_payload.get(key) == value for key, value in identity_values.items())
+
+        return append_log_event_once(self.events_path, factory, matches)
+
+    def integrity(self) -> dict[str, Any]:
+        return inspect_event_log(self.events_path).to_dict()
+
+    def checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        bindings: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        snapshot = persist_integrity_checkpoint(
+            self.events_path,
+            audit_dir=self.run_dir / "audit",
+            checkpoint=checkpoint,
+            bindings=bindings,
+        )
+        if snapshot.get("status") != "valid":
+            issues = snapshot.get("issues", [])
+            first = issues[0] if isinstance(issues, list) and issues else {}
+            raise InfrastructureError(
+                "events.jsonl integrity checkpoint failed "
+                f"(checkpoint={checkpoint}, "
+                f"issue={first.get('type', 'unknown')})"
+            )
+        return snapshot
 
     def save_prompt(self, turn_number: int, prompt: str) -> Path:
         path = self._turn_dir(turn_number) / "prompt.md"
@@ -351,16 +435,9 @@ class AuditRecorder:
         }
 
     def denied_event_count(self) -> int:
-        if not self.events_path.is_file():
-            return 0
-        count = 0
-        for line in self.events_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            data = json.loads(line)
-            if data.get("type") == "permission.denied":
-                count += 1
-        return count
+        return sum(
+            event.get("type") == "permission.denied" for event in self._events()
+        )
 
     def _record_codex_command(
         self, turn_number: int, item: Mapping[str, Any]
@@ -775,30 +852,7 @@ class AuditRecorder:
         return latest
 
     def _events(self) -> list[dict[str, Any]]:
-        if not self.events_path.is_file():
-            return []
-        return [
-            json.loads(line)
-            for line in self.events_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-
-    def _load_next_seq(self) -> int:
-        if not self.events_path.is_file():
-            return 1
-        last = 0
-        for line in self.events_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                event = json.loads(line)
-                seq = int(event["seq"])
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-                raise InfrastructureError("events.jsonl contains an invalid event") from exc
-            if seq != last + 1:
-                raise InfrastructureError("events.jsonl sequence is not continuous")
-            last = seq
-        return last + 1
+        return read_events(self.events_path, strict=True)[0]
 
 
 def file_sha256(path: str | Path) -> str:

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { EventRecord } from "../types/task";
+import { useOrchestrator } from "../composables/useOrchestrator";
 
 defineProps<{ events: EventRecord[] }>();
+const store = useOrchestrator();
 
 const labels: Record<string, string> = {
   "run.started": "任务启动",
@@ -50,7 +52,11 @@ function formatTime(value: string): string {
       <div><span class="section-kicker">实时记录</span><h2>事件时间线</h2></div>
       <span class="live-indicator"><i /> 实时</span>
     </div>
-    <div v-if="events.length" class="event-list">
+    <div v-if="store.eventIntegrity.value?.status === 'invalid'" class="callout danger-callout" role="alert">
+      <strong>事件时间线不可信，已停止展示</strong>
+      <p>磁盘中的事件序号或 JSONL 结构不连续；系统不会用 seq 去重来掩盖损坏记录。</p>
+    </div>
+    <div v-else-if="events.length" class="event-list">
       <article v-for="event in events.slice().reverse()" :key="event.seq" class="event-row">
         <span class="event-marker" />
         <div>
