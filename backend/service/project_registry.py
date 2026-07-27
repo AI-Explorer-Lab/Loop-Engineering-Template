@@ -8,6 +8,7 @@ from typing import Any
 from codex_loop.harness_runtime import HarnessRuntime
 from codex_loop.queue_workflow import QueueWorkflow
 from codex_loop.workflow import OrchestrationWorkflow
+from codex_loop.git_publish import GitPublishService
 
 from ..config.config import knowledge_from_settings, projects_from_settings
 from ..exceptions.business_exception import ProjectNotFoundError
@@ -89,6 +90,7 @@ class ProjectRegistry:
                 archive_retry_callback=(
                     None if harness is None else harness.retry_archive
                 ),
+                publish_service=self._publish_service(root, item),
             )
             queues = QueueService(
                 root,
@@ -134,3 +136,14 @@ class ProjectRegistry:
     def close(self, *, wait: bool = False) -> None:
         for context in self._contexts.values():
             context.task_service.close(wait=wait)
+
+    @staticmethod
+    def _publish_service(root: Path, item: dict[str, object]) -> GitPublishService | None:
+        publish = item.get("publish", {})
+        if not isinstance(publish, dict) or not bool(publish.get("enabled", False)):
+            return None
+        remote_name = str(publish.get("remote_name", "origin")).strip()
+        remote_url = str(publish.get("remote_url", "")).strip()
+        if not remote_url:
+            raise RuntimeError("publish.remote_url is required when publication is enabled")
+        return GitPublishService(root, remote_name=remote_name, remote_url=remote_url)

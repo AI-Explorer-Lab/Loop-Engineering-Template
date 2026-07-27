@@ -15,6 +15,7 @@ class FakeTaskService:
         self.rerun: str | None = None
         self.reviewed_commit_subject: str | None = None
         self.retried: str | None = None
+        self.published: tuple[str, str, str] | None = None
 
     def start_task(
         self,
@@ -81,6 +82,18 @@ class FakeTaskService:
         self.retried = f"archive:{task_id}"
         values = _snapshot(task_id=task_id, status="success").to_dict()
         values["delivery_status"] = "archived"
+        return TaskSnapshot(**values)
+
+    def publish_task(
+        self, task_id: str, *, commit_sha: str, reviewer: str
+    ) -> TaskSnapshot:
+        self.published = (task_id, commit_sha, reviewer)
+        values = _snapshot(task_id=task_id, status="success").to_dict()
+        values.update(
+            review_status="approved",
+            delivery_status="archived",
+            publish={"status": "published", "commit_sha": commit_sha},
+        )
         return TaskSnapshot(**values)
 
 
@@ -216,6 +229,25 @@ def test_delivery_and_archive_retry_endpoints_are_separate() -> None:
     assert archived.status_code == 202
     assert archived.json()["data"]["delivery_status"] == "archived"
     assert service.retried == "archive:task-9"
+
+
+def test_publish_endpoint_requires_a_confirmed_commit_and_reviewer() -> None:
+    service = FakeTaskService()
+    sha = "b" * 40
+    with _client(service) as client:
+        response = client.post(
+            "/api/tasks/task-9/publish",
+            json={"commit_sha": sha, "reviewer": "Local Reviewer"},
+        )
+        invalid = client.post(
+            "/api/tasks/task-9/publish",
+            json={"commit_sha": "not-a-sha", "reviewer": ""},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["publish"]["status"] == "published"
+    assert service.published == ("task-9", sha, "Local Reviewer")
+    assert invalid.status_code == 422
 
 
 def test_conflict_is_returned_as_structured_409() -> None:

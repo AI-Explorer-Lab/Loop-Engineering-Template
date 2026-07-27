@@ -43,6 +43,7 @@ class TaskSnapshot:
     evaluations: dict[str, Any] = field(default_factory=dict)
     commit: dict[str, Any] = field(default_factory=dict)
     archive: dict[str, Any] = field(default_factory=dict)
+    publish: dict[str, Any] = field(default_factory=dict)
     queue_id: str | None = None
     sequence: int | None = None
     rerun_of: str | None = None
@@ -86,6 +87,7 @@ class TaskSnapshot:
             "evaluations": dict(self.evaluations),
             "commit": dict(self.commit),
             "archive": dict(self.archive),
+            "publish": dict(self.publish),
             "queue_id": self.queue_id,
             "sequence": self.sequence,
             "rerun_of": self.rerun_of,

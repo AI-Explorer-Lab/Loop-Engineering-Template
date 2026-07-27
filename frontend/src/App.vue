@@ -68,6 +68,7 @@ onUnmounted(() => {
       <symbol id="icon-monitor" viewBox="0 0 24 24"><path d="M4 12h3l2-5 4 10 2-5h5" /></symbol>
       <symbol id="icon-changes" viewBox="0 0 24 24"><path d="M8 5 4 9l4 4M16 11l4 4-4 4M14 4l-4 16" /></symbol>
       <symbol id="icon-review" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6" /></symbol>
+      <symbol id="icon-publish" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14" /></symbol>
       <symbol id="icon-history" viewBox="0 0 24 24"><path d="M4 6v5h5M5 11a8 8 0 1 0 2-5M12 8v5l3 2" /></symbol>
       <symbol id="icon-projects" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4z" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></symbol>
@@ -86,6 +87,7 @@ onUnmounted(() => {
         <RouterLink to="/monitor"><svg><use href="#icon-monitor" /></svg><span>执行监控</span><i v-if="store.isRunning.value" class="nav-live-dot" /></RouterLink>
         <RouterLink to="/changes"><svg><use href="#icon-changes" /></svg><span>代码变更</span></RouterLink>
         <RouterLink to="/review"><svg><use href="#icon-review" /></svg><span>人工审查</span><b v-if="store.needsReview.value" class="nav-badge">1</b></RouterLink>
+        <RouterLink to="/publish"><svg><use href="#icon-publish" /></svg><span>发布交付</span></RouterLink>
       </nav>
 
       <nav class="secondary-nav" aria-label="工作台">

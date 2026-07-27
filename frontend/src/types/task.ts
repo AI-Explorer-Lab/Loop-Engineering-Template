@@ -135,6 +135,7 @@ export interface TaskData {
   evaluations: Record<string, unknown>;
   commit: Record<string, unknown>;
   archive: Record<string, unknown>;
+  publish: Record<string, unknown>;
   queue_id: string | null;
   sequence: number | null;
   rerun_of: string | null;

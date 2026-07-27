@@ -13,6 +13,11 @@ development:
         repo_root: /absolute/path/to/my-project
         default: true
         knowledge_actor_id: local-user
+        # Publication remains opt-in and may only target this exact remote URL.
+        publish:
+          enabled: true
+          remote_name: origin
+          remote_url: https://github.com/owner/my-project.git
         validation:
           required_paths:
             - backend/tests

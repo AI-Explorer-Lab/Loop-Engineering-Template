@@ -41,6 +41,7 @@ import {
   getTaskDiff,
   getTaskReport,
   pauseTask,
+  publishTask,
   rerunTask,
   retryTaskArchive,
   retryTaskCommit,
@@ -832,6 +833,26 @@ export function createOrchestrator() {
     }
   }
 
+  async function publishCurrentTask(reviewer: string): Promise<boolean> {
+    if (!task.value) return false;
+    controlling.value = true;
+    pageError.value = "";
+    try {
+      const updated = await publishTask(task.value.task_id, {
+        commit_sha: String(task.value.commit.commit_sha || ""),
+        reviewer,
+      });
+      task.value = updated;
+      await refreshEventsAndLogs();
+      return true;
+    } catch (error) {
+      recordError(error, "GitHub 发布失败。");
+      return false;
+    } finally {
+      controlling.value = false;
+    }
+  }
+
   async function skipSubtask(taskId: string): Promise<void> {
     if (!queue.value) return;
     controlling.value = true;
@@ -1004,6 +1025,7 @@ export function createOrchestrator() {
     runControl,
     submitReview,
     retryDelivery,
+    publishCurrentTask,
     skipSubtask,
     movePendingSubtask,
     selectLog,

@@ -75,6 +75,19 @@ class ReviewRequest(BaseModel):
         return subject
 
 
+class PublishRequest(BaseModel):
+    commit_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    reviewer: str = Field(min_length=1, max_length=200)
+
+    @field_validator("reviewer")
+    @classmethod
+    def validate_reviewer(cls, value: str) -> str:
+        reviewer = value.strip()
+        if not reviewer:
+            raise ValueError("reviewer cannot be blank")
+        return reviewer
+
+
 class QueueReorderRequest(BaseModel):
     task_ids: list[str] = Field(min_length=1, max_length=50)
     expected_updated_at: str | None = None

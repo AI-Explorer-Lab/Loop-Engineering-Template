@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
-from ..domain.req import ReviewRequest, TaskCreateRequest
+from ..domain.req import PublishRequest, ReviewRequest, TaskCreateRequest
 from ..domain.res import ApiResponse, TaskData
 from ..service.task_service import TaskService
 from .dependencies import project_context
@@ -134,5 +134,18 @@ async def retry_delivery(task_id: str, request: Request) -> ApiResponse[TaskData
 async def retry_archive(task_id: str, request: Request) -> ApiResponse[TaskData]:
     snapshot = await run_in_threadpool(
         _service(request).retry_archive, task_id
+    )
+    return _response(request, snapshot)
+
+
+@router.post("/{task_id}/publish", response_model=ApiResponse[TaskData])
+async def publish_task(
+    task_id: str, payload: PublishRequest, request: Request
+) -> ApiResponse[TaskData]:
+    snapshot = await run_in_threadpool(
+        _service(request).publish_task,
+        task_id,
+        commit_sha=payload.commit_sha,
+        reviewer=payload.reviewer,
     )
     return _response(request, snapshot)

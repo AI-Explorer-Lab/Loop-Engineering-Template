@@ -8,6 +8,7 @@ from codex_loop.models import DeliveryStatus, QueueStatus, TaskSpec
 from codex_loop.queue_workflow import QueueWorkflow
 from codex_loop.review import ReviewError, ReviewService
 from codex_loop.git_delivery import DeliveryError, GitDeliveryService
+from codex_loop.git_publish import GitPublishService, PublishError
 from codex_loop.state import QueueStore, redact_sensitive_text
 from codex_loop.workflow import OrchestrationWorkflow
 
@@ -45,6 +46,7 @@ class TaskService:
         delivery_service: GitDeliveryService | None = None,
         archive_callback: ArchiveCallback | None = None,
         archive_retry_callback: ArchiveCallback | None = None,
+        publish_service: GitPublishService | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.executor = executor or TaskExecutor()
@@ -59,6 +61,7 @@ class TaskService:
         self.delivery_service = delivery_service or GitDeliveryService(self.repo_root)
         self.archive_callback = archive_callback
         self.archive_retry_callback = archive_retry_callback
+        self.publish_service = publish_service
         self.queue_store = QueueStore(self.repo_root)
         self.queue_workflow_factory = queue_workflow_factory or (
             lambda: QueueWorkflow(
@@ -396,6 +399,28 @@ class TaskService:
                 self.archive_retry_callback(task_id, store=mapper.store)
             except Exception as exc:
                 raise ReviewConflictError(str(exc)) from exc
+        snapshot = mapper.load_snapshot(task_id)
+        if snapshot is None:
+            raise TaskNotFoundError(task_id)
+        return snapshot
+
+    def publish_task(
+        self, task_id: str, *, commit_sha: str, reviewer: str
+    ) -> TaskSnapshot:
+        self._validate_task_id(task_id)
+        mapper, queue_id = self._mapper_for_task(task_id)
+        if queue_id is not None:
+            raise ReviewConflictError("queue subtasks cannot be published individually")
+        if mapper.load_task(task_id) is None:
+            raise TaskNotFoundError(task_id)
+        if self.publish_service is None:
+            raise ReviewConflictError("publication is not configured for this project")
+        try:
+            self.publish_service.publish(
+                task_id, commit_sha=commit_sha, reviewer=reviewer
+            )
+        except (PublishError, ValueError) as exc:
+            raise ReviewConflictError(str(exc)) from exc
         snapshot = mapper.load_snapshot(task_id)
         if snapshot is None:
             raise TaskNotFoundError(task_id)

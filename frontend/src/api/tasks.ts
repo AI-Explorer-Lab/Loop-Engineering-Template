@@ -69,3 +69,13 @@ export function retryTaskArchive(taskId: string): Promise<TaskData> {
     { method: "POST" },
   );
 }
+
+export function publishTask(
+  taskId: string,
+  payload: { commit_sha: string; reviewer: string },
+): Promise<TaskData> {
+  return apiRequest<TaskData>(
+    `/api/tasks/${encodeURIComponent(taskId)}/publish`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
