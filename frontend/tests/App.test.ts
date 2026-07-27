@@ -13,6 +13,7 @@ const taskApi = vi.hoisted(() => ({
   pauseTask: vi.fn(),
   cancelTask: vi.fn(),
   rerunTask: vi.fn(),
+  publishTask: vi.fn(),
   resumeTask: vi.fn(),
 }));
 const planApi = vi.hoisted(() => ({
@@ -103,6 +104,7 @@ function task(status: TaskData["status"], overrides: Partial<TaskData> = {}): Ta
     evaluations: {},
     commit: {},
     archive: {},
+    publish: {},
     queue_id: null,
     sequence: null,
     rerun_of: null,

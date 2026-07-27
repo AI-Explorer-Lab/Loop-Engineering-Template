@@ -106,6 +106,7 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                     item.get("knowledge_actor_id", "")
                 ).strip(),
                 "validation_profile": validation_profile,
+                "publish": item.get("publish", {}),
             }
         )
     defaults = [item for item in projects if item["is_default"]]

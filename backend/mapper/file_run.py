@@ -79,6 +79,7 @@ class FileRunMapper:
             "summary": self._optional_json(run_dir / "archive/summary.json"),
             "outbox": self._optional_json(run_dir / "archive/outbox.json"),
         }
+        publish = self._optional_json(run_dir / "delivery/publish.json")
         repository = manifest.get("repository", {})
         workspace = (
             {
@@ -169,6 +170,7 @@ class FileRunMapper:
             },
             commit=commit,
             archive={key: value for key, value in archive.items() if value},
+            publish=publish,
             queue_id=task.queue_id,
             sequence=task.sequence,
             rerun_of=task.rerun_of,

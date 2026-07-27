@@ -5,6 +5,7 @@ import CreateView from "../views/CreateView.vue";
 import HistoryView from "../views/HistoryView.vue";
 import MonitorView from "../views/MonitorView.vue";
 import ProjectsView from "../views/ProjectsView.vue";
+import PublishView from "../views/PublishView.vue";
 import ReviewView from "../views/ReviewView.vue";
 import SettingsView from "../views/SettingsView.vue";
 
@@ -14,6 +15,7 @@ export const routes: RouteRecordRaw[] = [
     { path: "/monitor", name: "monitor", component: MonitorView, meta: { title: "监控" } },
     { path: "/changes", name: "changes", component: ChangesView, meta: { title: "变更" } },
     { path: "/review", name: "review", component: ReviewView, meta: { title: "审核" } },
+    { path: "/publish", name: "publish", component: PublishView, meta: { title: "发布交付" } },
     { path: "/history", name: "history", component: HistoryView, meta: { title: "历史" } },
     { path: "/projects", name: "projects", component: ProjectsView, meta: { title: "项目" } },
     { path: "/settings", name: "settings", component: SettingsView, meta: { title: "设置" } },

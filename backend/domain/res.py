@@ -129,6 +129,7 @@ class TaskData(BaseModel):
     evaluations: dict[str, Any] = Field(default_factory=dict)
     commit: dict[str, Any] = Field(default_factory=dict)
     archive: dict[str, Any] = Field(default_factory=dict)
+    publish: dict[str, Any] = Field(default_factory=dict)
     queue_id: str | None = None
     sequence: int | None = None
     rerun_of: str | None = None
