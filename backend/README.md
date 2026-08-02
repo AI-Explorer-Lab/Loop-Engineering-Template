@@ -26,14 +26,18 @@ conda run -n loop-engineering uvicorn backend.main:app \
 
 通过根目录的 `start.sh` 启动时，页面和 API 统一从
 `http://127.0.0.1:8100` 访问；`18100` 仅用于 Vite 与 FastAPI 之间的本机通信。
-默认配置位于 `config/app.yaml`，机器专属覆盖写入忽略提交的
-`config/app.local.yaml`；示例见 `config/app.local.example.yaml`。
+默认配置位于 `backend/config/app.yaml`，机器专属覆盖写入忽略提交的
+`backend/config/app.local.yaml`；示例见 `backend/config/app.local.example.yaml`。
 
 `agent.harness_enabled=true` 时，每个 `agent.projects[]` 必须配置
 `knowledge_actor_id`，全局 `agent.knowledge` 必须指向使用者自行准备的
 Knowledge-Base 和 MCP registry。每个项目还需配置自己的验证命令和依赖目录。
 这些身份只用于知识访问与审计，不是登录账号。能力不可用时服务启动失败关闭，
 不会静默退回无知识评估。
+
+发布默认关闭。启用时，项目的 `publish` 配置必须同时固定 `remote_name` 和
+`remote_url`；服务会在实际 push 前再次核对任务分支、HEAD、工作区、commit
+证据和仓库远端，不能把发布远端交给任务或模型动态决定。
 
 ## 接口
 
@@ -46,18 +50,34 @@ Knowledge-Base 和 MCP registry。每个项目还需配置自己的验证命令�
 | `POST` | `/api/tasks` | 提交需求，立即返回 `202` 和任务编号 |
 | `GET` | `/api/tasks/{task_id}` | 查询阶段、验证轮次和最终状态 |
 | `POST` | `/api/tasks/{task_id}/resume` | 后端中断后恢复原任务和原 thread |
+| `POST` | `/api/tasks/{task_id}/pause` | 请求暂停任务 |
+| `POST` | `/api/tasks/{task_id}/cancel` | 请求取消任务 |
+| `POST` | `/api/tasks/{task_id}/rerun` | 对已结束任务创建重新运行 |
 | `GET` | `/api/tasks/{task_id}/report` | 读取完成后的 `report.md` |
 | `GET` | `/api/tasks/{task_id}/diff` | 只读获取脱敏后的最终 diff |
 | `POST` | `/api/tasks/{task_id}/review` | 提交一次人工结论并绑定 diff SHA-256 |
 | `POST` | `/api/tasks/{task_id}/delivery/retry` | 幂等恢复批准后的 commit 检查点 |
 | `POST` | `/api/tasks/{task_id}/archive/retry` | 只重试已有归档 outbox，不重跑 Archiver |
+| `POST` | `/api/tasks/{task_id}/publish` | 再次人工确认后推送已归档的单任务分支 |
 | `POST` | `/api/queues` | 提交至少两个有固定顺序的子任务 |
 | `GET` | `/api/queues/{queue_id}` | 查询整体进度和当前子任务 |
 | `POST` | `/api/queues/{queue_id}/resume` | 环境故障修复后恢复当前子任务 |
+| `POST` | `/api/queues/{queue_id}/pause` | 请求暂停队列 |
+| `POST` | `/api/queues/{queue_id}/cancel` | 请求取消队列 |
+| `POST` | `/api/queues/{queue_id}/rerun` | 对已结束队列创建重新运行 |
+| `POST` | `/api/queues/{queue_id}/subtasks/{task_id}/skip` | 跳过指定的待执行子任务 |
+| `POST` | `/api/queues/{queue_id}/reorder` | 在版本匹配时重排待执行子任务 |
 | `GET` | `/api/queues/{queue_id}/report` | 读取长任务汇总报告 |
 | `GET` | `/api/queues/{queue_id}/diff` | 读取已批准的最终累计 Diff |
+| `GET` | `/api/projects` | 查看已登记项目 |
 | `GET` | `/api/capabilities` | 只读查看 Knowledge-Base、MCP、Skills 和归档积压 |
 | `GET` | `/api/metrics` | 从文件记录计算成功率、分层失败、修复与交付指标 |
+| `GET` | `/api/history` | 分页查询任务和队列历史 |
+| `GET` | `/api/history/{kind}/{identifier}/events` | 分页读取事件 |
+| `GET` | `/api/history/{kind}/{identifier}/stream` | 以 SSE 持续读取事件 |
+| `GET` | `/api/history/{kind}/{identifier}/logs` | 查看运行日志清单 |
+| `GET` | `/api/history/{kind}/{identifier}/logs/{log_id}` | 读取指定日志 |
+| `GET/POST` | `/api/notifications*` | 查询通知、标记已读和更新通知设置 |
 
 创建任务示例：
 
@@ -71,7 +91,9 @@ API 在单工作线程中执行 Codex，因此 HTTP 请求不会等待开发和�
 
 创建长任务时，`subtasks` 数组顺序就是唯一执行顺序，不接收依赖字段。每项分别包含 `requirement` 和至少一条 `acceptance_criteria`。当前子任务机器流程结束后，仍使用 `/api/tasks/{task_id}`、`report`、`diff` 和 `review` 查看及审查；批准后后台单工作线程才会执行下一项。
 
-审查请求包含 `decision`、`reviewer`、`comment`、`reviewed_diff_sha256` 和批准时的单行 `commit_subject`。只允许 `approved`、`changes_requested`、`rejected`；任务未结束、Diff/HEAD/branch/tree 已变化、Diff 含疑似密钥、Git identity 缺失或旧任务时返回冲突。批准只在任务分支创建一个与审查绑定的 commit，不执行 merge、push、PR、rebase 或 tag。单任务结论不可覆盖；队列子任务的多次返修审查按历史追加保存。
+审查请求包含 `decision`、`reviewer`、`comment`、`reviewed_diff_sha256` 和批准时的单行 `commit_subject`。只允许 `approved`、`changes_requested`、`rejected`；任务未结束、Diff/HEAD/branch/tree 已变化、Diff 含疑似密钥、Git identity 缺失或旧任务时返回冲突。批准只在任务分支创建一个与审查绑定的 commit；审查接口不执行 merge、push、PR、rebase 或 tag。单任务结论不可覆盖；队列子任务的多次返修审查按历史追加保存。
+
+发布请求只接受单任务，并要求 `review_status=approved`、`delivery_status=archived`、已确认的 commit SHA 和发布确认人。发布服务会核对记录中的 task branch、HEAD、工作区和配置的远端 URL，然后只 push 该任务分支；队列子任务不能单独发布，发布失败不会伪造成功记录。
 
 Plan 草稿只保存输入、冻结 Context、结构化角色输出和验收映射，不创建 worktree。人工确认必须保留原始需求哈希、Context 哈希和全部 `AC-xxx`，一条子任务复用单任务服务，两条以上复用严格串行队列服务。
 
