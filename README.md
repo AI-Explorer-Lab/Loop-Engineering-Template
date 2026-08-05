@@ -2,7 +2,7 @@
 
 这是一个可独立部署、本机运行、文件化且严格受控的 Loop Engineering 控制面。它可以登记多个位于任意绝对路径的 Git 项目，为每个任务创建隔离 worktree，调用 Codex 生成和修复代码，执行项目自己的固定验证，再经过人工审查后提交任务分支；已归档的单任务还可以在再次人工确认后推送到该项目配置的固定远端。
 
-仓库只包含 Orchestrator。Knowledge-Base 和本地 MCP Server 是可选的外部组件，不在本仓库复制或维护。
+仓库只包含 Orchestrator。[Knowledge-Base](https://github.com/AI-Explorer-Lab/Knowledge-Base) 和本地 MCP Server 是可选的外部组件，不在本仓库复制或维护。
 
 ```text
 Loop-Engineering-Template/
