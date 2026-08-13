@@ -42,7 +42,7 @@ async function create(): Promise<void> {
 <template>
   <div class="view-stack projects-view">
     <header class="view-header">
-      <div><span class="section-kicker">本地项目工作区</span><h1>项目</h1><p>每个项目保持独立状态与串行执行；新项目会自动初始化 Git 和 Harness 忽略规则。</p></div>
+      <div><span class="section-kicker">本地项目工作区</span><h1>项目</h1><p>每个项目保持独立状态与串行执行；新项目会自动初始化 Git、Harness 项目配置和本地运行隔离。</p></div>
       <button class="primary-button" type="button" data-test="new-project" @click="showCreateForm = !showCreateForm">＋ 新建项目</button>
     </header>
     <section v-if="showCreateForm" class="surface project-create-form" data-test="project-create-form">
@@ -64,6 +64,6 @@ async function create(): Promise<void> {
         <span v-else class="selected-project-label">✓ 当前项目</span>
       </article>
     </div>
-    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.gitignore</code>，并注册默认 Python unittest 验证配置；完成后前端自动选中新项目。</p></section>
+    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并注册默认 Python unittest 验证配置；认证信息与临时运行状态保持本地隔离，完成后前端自动选中新项目。</p></section>
   </div>
 </template>

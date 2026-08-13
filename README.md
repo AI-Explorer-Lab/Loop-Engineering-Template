@@ -15,6 +15,8 @@ Loop-Engineering-Template/
 
 被管理项目/
 ├── .git/
+├── .harness/
+│   └── project.json             Harness 项目配置（纳入 Git）
 ├── .codex-orchestrator/
 │   ├── worktrees/<task-id>/       codex/<task-id> 专用工作区
 │   ├── runs/<task-id>/            单任务状态、事件和审计产物

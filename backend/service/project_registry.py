@@ -92,7 +92,11 @@ class ProjectRegistry:
             raise ValueError("project path must be absolute")
         path = path.resolve()
         project_id = self._new_project_id(normalized_name, path)
-        provision_git_project(path)
+        provision_git_project(
+            path,
+            project_id=project_id,
+            project_name=normalized_name,
+        )
         item = {
             "id": project_id,
             "project_id": project_id,

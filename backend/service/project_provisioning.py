@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,9 +10,18 @@ from pathlib import Path
 from ..exceptions.business_exception import BusinessException
 
 
-PROJECT_GITIGNORE = """# Harness and local orchestrator state
+HARNESS_DIRECTORY = ".harness"
+HARNESS_CONFIG_FILE = "project.json"
+
+PROJECT_GITIGNORE = """# Sensitive credentials and temporary runtime files
 .codex-runtime/
-.codex-orchestrator/
+.codex-orchestrator/active.lock
+.codex-orchestrator/worktrees/
+.codex-orchestrator/runs/
+.codex-orchestrator/queues/
+.codex-orchestrator/drafts/
+.codex-orchestrator/memory/
+.codex-orchestrator/notifications.json
 
 # Python
 __pycache__/
@@ -25,8 +35,13 @@ class ProjectProvisioningError(BusinessException):
         super().__init__(message, status_code=status_code)
 
 
-def provision_git_project(project_path: Path) -> None:
-    """Create one new directory, initialize Git, and create its first commit."""
+def provision_git_project(
+    project_path: Path,
+    *,
+    project_id: str,
+    project_name: str,
+) -> None:
+    """Create one new Git project with tracked Harness configuration."""
 
     raw_path = project_path.expanduser()
     if not raw_path.is_absolute():
@@ -43,8 +58,26 @@ def provision_git_project(project_path: Path) -> None:
         path.mkdir()
         created = True
         (path / ".gitignore").write_text(PROJECT_GITIGNORE, encoding="utf-8")
+        harness_directory = path / HARNESS_DIRECTORY
+        harness_directory.mkdir()
+        (harness_directory / HARNESS_CONFIG_FILE).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "kind": "codex-harness-project",
+                    "project_id": project_id,
+                    "project_name": project_name,
+                    "state_root": ".codex-orchestrator",
+                    "secure_runtime_root": ".codex-runtime",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         _run_git(path, "init")
-        _run_git(path, "add", ".gitignore")
+        _run_git(path, "add", ".gitignore", f"{HARNESS_DIRECTORY}/{HARNESS_CONFIG_FILE}")
         _run_git(
             path,
             "-c",
@@ -87,4 +120,10 @@ def _run_git(path: Path, *args: str) -> None:
         )
 
 
-__all__ = ["PROJECT_GITIGNORE", "ProjectProvisioningError", "provision_git_project"]
+__all__ = [
+    "HARNESS_CONFIG_FILE",
+    "HARNESS_DIRECTORY",
+    "PROJECT_GITIGNORE",
+    "ProjectProvisioningError",
+    "provision_git_project",
+]

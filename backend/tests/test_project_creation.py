@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
 
 from fastapi.testclient import TestClient
 
@@ -50,7 +52,25 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     assert created["repo_root"] == str(target)
     assert (target / ".gitignore").is_file()
     assert ".codex-runtime/" in (target / ".gitignore").read_text(encoding="utf-8")
+    harness_config = target / ".harness" / "project.json"
+    assert harness_config.is_file()
+    assert ".harness/" not in (target / ".gitignore").read_text(encoding="utf-8")
+    assert json.loads(harness_config.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "kind": "codex-harness-project",
+        "project_id": "read-notes",
+        "project_name": "Reading Notes",
+        "state_root": ".codex-orchestrator",
+        "secure_runtime_root": ".codex-runtime",
+    }
     assert (target / ".git").is_dir()
+    tracked = subprocess.run(
+        ["git", "-C", str(target), "ls-files", "--cached"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert ".harness/project.json" in tracked
     assert "read-notes" in {item["project_id"] for item in projects.json()["data"]}
 
     restarted = ProjectRegistry(config)
