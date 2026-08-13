@@ -57,6 +57,10 @@ class PlatformService:
             "is_default": context.is_default,
             "active_identifier": context.task_service.executor.active_task_id(),
             "knowledge_actor_id": context.knowledge_actor_id,
+            "publish_enabled": context.publish_enabled,
+            "publish_remote_name": context.publish_remote_name,
+            "publish_remote_url": context.publish_remote_url,
+            "publish_repository_name": context.publish_repository_name,
         }
 
     def create_project(self, *, name: str, repo_path: str) -> dict[str, Any]:

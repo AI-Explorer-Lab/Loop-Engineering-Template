@@ -84,3 +84,43 @@ def test_duplicate_task_and_wrong_worktree_identity_are_rejected(
     git(workspace.worktree, "checkout", "--detach", "-q")
     with pytest.raises(InfrastructureError, match="branch changed"):
         manager.verify(workspace)
+
+
+def test_harness_runtime_is_excluded_but_other_untracked_files_are_rejected(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "tracked.txt").write_text("baseline\n", encoding="utf-8")
+    git(tmp_path, "add", "tracked.txt")
+    git(
+        tmp_path,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "baseline",
+    )
+
+    manager = WorkspaceManager(tmp_path)
+    workspace = manager.create(task("runtime-clean-test"))
+    runtime_file = workspace.worktree / ".codex-runtime/app-server.sb"
+    runtime_file.parent.mkdir(parents=True)
+    runtime_file.write_text("runtime state\n", encoding="utf-8")
+
+    assert ".codex-runtime/app-server.sb" in git(
+        workspace.worktree, "status", "--short", "--untracked-files=all"
+    )
+    manager.verify(workspace, require_clean=True)
+
+    (workspace.worktree / "unexpected.txt").write_text(
+        "task change\n", encoding="utf-8"
+    )
+    with pytest.raises(InfrastructureError, match="worktree is not clean"):
+        manager.verify(workspace, require_clean=True)

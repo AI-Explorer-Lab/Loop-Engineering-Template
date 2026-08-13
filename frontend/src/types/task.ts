@@ -213,6 +213,10 @@ export interface ProjectData {
   is_default: boolean;
   active_identifier: string | null;
   knowledge_actor_id: string;
+  publish_enabled?: boolean;
+  publish_remote_name?: string;
+  publish_remote_url?: string;
+  publish_repository_name?: string;
 }
 
 export interface HistoryItemData {

@@ -30,6 +30,10 @@ class ProjectData(BaseModel):
     is_default: bool
     active_identifier: str | None = None
     knowledge_actor_id: str = ""
+    publish_enabled: bool = False
+    publish_remote_name: str = "origin"
+    publish_remote_url: str = ""
+    publish_repository_name: str = ""
 
 
 class HistoryItemData(BaseModel):

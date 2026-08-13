@@ -47,7 +47,11 @@ from .state import (
 from .validation_runner import ValidationRunner
 from .validation_evidence import ValidationEvidenceSnapshot
 from .validation_profile import ValidationProfile
-from .workspace import WorkspaceInfo, WorkspaceManager
+from .workspace import (
+    HARNESS_RUNTIME_PATHSPEC,
+    WorkspaceInfo,
+    WorkspaceManager,
+)
 
 
 MAX_VALIDATION_FAILURES = 3
@@ -1723,9 +1727,27 @@ class OrchestrationWorkflow:
 
     def _safe_git_summary(self, root: Path) -> str:
         try:
-            status = self._run_git(root, "status", "--short", "--untracked-files=all")
-            unstaged = self._run_git(root, "diff", "--stat")
-            staged = self._run_git(root, "diff", "--cached", "--stat")
+            status = self._run_git(
+                root,
+                "status",
+                "--short",
+                "--untracked-files=all",
+                "--",
+                ".",
+                HARNESS_RUNTIME_PATHSPEC,
+            )
+            unstaged = self._run_git(
+                root, "diff", "--stat", "--", ".", HARNESS_RUNTIME_PATHSPEC
+            )
+            staged = self._run_git(
+                root,
+                "diff",
+                "--cached",
+                "--stat",
+                "--",
+                ".",
+                HARNESS_RUNTIME_PATHSPEC,
+            )
             return "\n\n".join(
                 [
                     "git status --short:\n" + (status.strip() or "（工作区干净）"),

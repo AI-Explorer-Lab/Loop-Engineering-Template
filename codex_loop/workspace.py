@@ -17,6 +17,7 @@ from .state import redact_sensitive_text
 
 
 PROTECTED_BRANCHES = ("main", "master")
+HARNESS_RUNTIME_PATHSPEC = ":(exclude).codex-runtime"
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +154,13 @@ class WorkspaceManager:
             raise InfrastructureError("Task worktree points at unexpected Git metadata")
         if require_clean:
             status = self._git_at(
-                info.worktree, "status", "--short", "--untracked-files=all"
+                info.worktree,
+                "status",
+                "--short",
+                "--untracked-files=all",
+                "--",
+                ".",
+                HARNESS_RUNTIME_PATHSPEC,
             )
             if status.strip():
                 raise InfrastructureError("New task worktree is not clean")
@@ -260,4 +267,9 @@ class WorkspaceManager:
         return completed
 
 
-__all__ = ["PROTECTED_BRANCHES", "WorkspaceInfo", "WorkspaceManager"]
+__all__ = [
+    "HARNESS_RUNTIME_PATHSPEC",
+    "PROTECTED_BRANCHES",
+    "WorkspaceInfo",
+    "WorkspaceManager",
+]

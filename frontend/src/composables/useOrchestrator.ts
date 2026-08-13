@@ -64,10 +64,12 @@ import type {
   ProjectData,
   QueueCreatePayload,
   QueueData,
+  QueueStatus,
   ReviewDecision,
   RunKind,
   TaskCreatePayload,
   TaskData,
+  TaskStatus,
 } from "../types/task";
 
 const TASK_STORAGE_KEY = "codex-orchestrator:last-task-id";
@@ -244,6 +246,17 @@ function messageFrom(error: unknown, fallback: string): string {
     return details ? `${error.message}（${details}）` : error.message;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+export function isTransientRunArtifactNotFound(
+  error: unknown,
+  kind: RunKind,
+  status: TaskStatus | QueueStatus,
+): boolean {
+  return error instanceof ApiError
+    && error.status === 404
+    && ((kind === "task" && status === "accepted")
+      || (kind === "queue" && status === "pending"));
 }
 
 function setRefValue<T>(target: Ref<T>, value: T): void {
@@ -431,6 +444,19 @@ export function createOrchestrator() {
       eventIntegrity.value = page.integrity;
       logs.value = availableLogs;
     } catch (error) {
+      if (
+        currentKind.value
+        && identifier.value
+        && ((currentKind.value === "task" && task.value)
+          || (currentKind.value === "queue" && queue.value))
+        && isTransientRunArtifactNotFound(
+          error,
+          currentKind.value,
+          currentKind.value === "task"
+            ? task.value!.status
+            : queue.value!.status,
+        )
+      ) return;
       recordError(error, "事件或日志读取失败。");
     }
   }

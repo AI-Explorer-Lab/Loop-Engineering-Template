@@ -33,6 +33,10 @@ class ProjectContext:
     repo_root: Path
     is_default: bool
     knowledge_actor_id: str
+    publish_enabled: bool
+    publish_remote_name: str
+    publish_remote_url: str
+    publish_repository_name: str
     harness: HarnessRuntime | None
     task_service: TaskService
     queue_service: QueueService
@@ -124,6 +128,14 @@ class ProjectRegistry:
         project_id = str(item["project_id"])
         executor = TaskExecutor(global_gate=self._gate)
         root = Path(item["repo_root"])
+        publish = item.get("publish", {})
+        publish_config = publish if isinstance(publish, dict) else {}
+        publish_enabled = bool(publish_config.get("enabled", False))
+        publish_remote_name = str(
+            publish_config.get("remote_name", "origin")
+        ).strip() or "origin"
+        publish_remote_url = str(publish_config.get("remote_url", "")).strip()
+        publish_repository_name = root.name
         validation_profile = item["validation_profile"]
         harness = (
             HarnessRuntime(
@@ -181,6 +193,10 @@ class ProjectRegistry:
             repo_root=root,
             is_default=bool(item["is_default"]),
             knowledge_actor_id=str(item.get("knowledge_actor_id", "")),
+            publish_enabled=publish_enabled,
+            publish_remote_name=publish_remote_name,
+            publish_remote_url=publish_remote_url,
+            publish_repository_name=publish_repository_name,
             harness=harness,
             task_service=tasks,
             queue_service=queues,

@@ -60,6 +60,29 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def unignored_repository(tmp_path: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "modified.txt").write_text("old\n", encoding="utf-8")
+    git(tmp_path, "add", "modified.txt")
+    git(
+        tmp_path,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "baseline",
+    )
+    return tmp_path
+
+
 def task(task_id: str) -> TaskSpec:
     return TaskSpec(
         task_id=task_id,
@@ -522,6 +545,28 @@ def test_audit_fails_closed_if_an_outside_command_succeeds(
     ]
     assert events[-1]["type"] == "permission.denied"
     assert events[-1]["payload"]["target"] == outside_target.as_posix()
+
+
+def test_audit_excludes_harness_runtime_without_gitignore(
+    unignored_repository: Path,
+) -> None:
+    info = workspace(unignored_repository, "audit-runtime-no-ignore")
+    runtime_file = info.worktree / ".codex-runtime/app-server.sb"
+    runtime_file.parent.mkdir(parents=True)
+    runtime_file.write_text("runtime state\n", encoding="utf-8")
+    (info.worktree / "added.txt").write_text("task change\n", encoding="utf-8")
+
+    audit = AuditRecorder(
+        unignored_repository / ".codex-orchestrator/runs/audit-runtime-no-ignore",
+        info.worktree,
+        info.base_commit,
+    )
+    changes = audit.capture_final_changes()
+    changed_paths = {item["path"] for item in changes["files"]}
+
+    assert "added.txt" in changed_paths
+    assert all(not path.startswith(".codex-runtime/") for path in changed_paths)
+    assert ".codex-runtime/app-server.sb" not in audit.current_diff_text()
 
 
 def test_audit_records_a_denied_helper_write_without_claiming_sandbox_escape(

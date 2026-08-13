@@ -9,16 +9,53 @@ const reviewer = ref("");
 const confirmed = ref(false);
 const commit = computed(() => String(store.task.value?.commit.commit_sha || ""));
 const published = computed(() => store.task.value?.publish.status === "published");
+const repositoryName = computed(() =>
+  store.activeProject.value?.publish_repository_name
+  || store.activeProject.value?.repo_root.split(/[\\/]/).filter(Boolean).pop()
+  || "—",
+);
+const configuredRemote = computed(() =>
+  String(store.activeProject.value?.publish_remote_url || "").trim(),
+);
+const publishConfigured = computed(() =>
+  Boolean(store.activeProject.value?.publish_enabled && configuredRemote.value),
+);
 const eligible = computed(() => Boolean(store.task.value) &&
   !store.task.value?.queue_id &&
   store.task.value?.review_status === "approved" &&
   store.task.value?.delivery_status === "archived" &&
   Boolean(commit.value));
-const remoteUrl = computed(() => String(store.task.value?.publish.remote_url ||
-  "已由项目发布策略固定，发布时由服务端再次核验"));
+const remoteUrl = computed(() => configuredRemote.value ||
+  String(store.task.value?.publish.remote_url || "未配置固定远端"));
+const actionDisabled = computed(() =>
+  published.value
+  || !eligible.value
+  || !publishConfigured.value
+  || store.controlling.value,
+);
+const actionLabel = computed(() => {
+  if (published.value) return "已发布";
+  if (store.controlling.value) return "正在发布…";
+  if (!publishConfigured.value) return "先配置 GitHub 远端";
+  if (!eligible.value) return "等待发布条件";
+  return "推送到 GitHub";
+});
+const actionMessage = computed(() => {
+  const task = store.task.value;
+  if (!task) return "请先选择一个任务。";
+  if (published.value) return "该任务分支已经发布，重复点击不会再次推送。";
+  if (task.queue_id) return "队列子任务不能单独发布，请发布队列完成后的整体结果。";
+  if (task.review_status !== "approved") return "需要先完成人工审核并批准当前 Diff。";
+  if (task.delivery_status !== "archived") return "需要先完成 commit 和本地归档。";
+  if (!commit.value) return "缺少已确认的 commit 证据。";
+  if (!publishConfigured.value) {
+    return `尚未配置固定 GitHub 远端；首次发布时请先创建仓库“${repositoryName.value}”并配置远端。`;
+  }
+  return `点击后由机器把当前已审核 commit 推送到固定远端；仓库名：${repositoryName.value}。`;
+});
 
 async function publish(): Promise<void> {
-  if (!eligible.value || !confirmed.value || !reviewer.value.trim()) return;
+  if (actionDisabled.value || !confirmed.value || !reviewer.value.trim()) return;
   await store.publishCurrentTask(reviewer.value.trim());
 }
 </script>
@@ -44,19 +81,16 @@ async function publish(): Promise<void> {
         <div><span>任务类型</span><strong>{{ store.task.value.queue_id ? '队列子任务（不可单独发布）' : '单任务' }}</strong></div>
       </div>
       <div class="delivery-hash"><span>待发布 Commit</span><div><code>{{ commit || '—' }}</code><CopyButton v-if="commit" :value="commit" label="Commit SHA" /></div></div>
+      <div class="delivery-hash"><span>GitHub 仓库名</span><code>{{ repositoryName }}</code></div>
       <div class="delivery-hash"><span>固定远端</span><code>{{ remoteUrl }}</code></div>
 
-      <template v-if="published">
-        <div class="global-success"><strong>已发布到 GitHub</strong><span>{{ String(store.task.value.publish.published_at || '') }} · {{ String(store.task.value.publish.branch || '') }}</span></div>
-      </template>
-      <template v-else-if="eligible">
-        <div class="review-form">
-          <label>发布确认人<input v-model="reviewer" maxlength="200" placeholder="填写你的姓名或标识" /></label>
-          <label class="check-row"><input v-model="confirmed" type="checkbox" />我确认将上述 commit 推送到已配置的固定 GitHub 远端。</label>
-          <button class="primary-button" type="button" :disabled="!confirmed || !reviewer.trim() || store.controlling.value" @click="publish">{{ store.controlling.value ? '正在发布…' : '推送到 GitHub' }}</button>
-        </div>
-      </template>
-      <p v-else class="capability-empty">需要先满足：单任务、审核状态为 approved、交付状态为 archived，且提交证据仍可读取。服务端在实际推送前还会核对 worktree、分支、提交 SHA 与远端。</p>
+      <div v-if="published" class="global-success"><strong>已发布到 GitHub</strong><span>{{ String(store.task.value.publish.published_at || '') }} · {{ String(store.task.value.publish.branch || '') }}</span></div>
+      <div class="review-form publish-action" data-test="publish-action">
+        <label>发布确认人<input v-model="reviewer" maxlength="200" placeholder="填写你的姓名或标识" :disabled="published" /></label>
+        <label class="check-row"><input v-model="confirmed" type="checkbox" :disabled="published" />我确认将上述 commit 推送到已配置的固定 GitHub 远端。</label>
+        <button class="primary-button" type="button" :disabled="actionDisabled || !confirmed || !reviewer.trim()" @click="publish">{{ actionLabel }}</button>
+        <p class="field-hint">{{ actionMessage }}</p>
+      </div>
     </section>
   </div>
 </template>

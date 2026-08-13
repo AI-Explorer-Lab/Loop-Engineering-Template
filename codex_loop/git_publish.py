@@ -9,6 +9,7 @@ from typing import Any
 
 from .models import DeliveryStatus, InfrastructureError, ReviewStatus, utc_now_iso
 from .state import StateStore, _atomic_write_json
+from .workspace import HARNESS_RUNTIME_PATHSPEC
 
 
 class PublishError(InfrastructureError):
@@ -62,7 +63,14 @@ class GitPublishService:
                 raise PublishError("task worktree is not on its recorded task branch")
             if self._git(worktree, "rev-parse", "HEAD") != expected_sha:
                 raise PublishError("task branch HEAD does not match committed delivery evidence")
-            if self._git(worktree, "status", "--porcelain"):
+            if self._git(
+                worktree,
+                "status",
+                "--porcelain",
+                "--",
+                ".",
+                HARNESS_RUNTIME_PATHSPEC,
+            ):
                 raise PublishError("task worktree is not clean")
             if self._git(worktree, "remote", "get-url", self.remote_name) != self.remote_url:
                 raise PublishError("configured publication remote does not match repository origin")
