@@ -33,6 +33,17 @@ export function getProjects(): Promise<ProjectData[]> {
   return apiRequest<ProjectData[]>("/api/projects");
 }
 
+export function createProject(payload: {
+  name: string;
+  repo_path: string;
+  backend_architecture_enabled?: boolean;
+}): Promise<ProjectData> {
+  return apiRequest<ProjectData>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getCapabilities(): Promise<HarnessCapabilitiesData> {
   return apiRequest<HarnessCapabilitiesData>("/api/capabilities");
 }

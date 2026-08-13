@@ -31,6 +31,7 @@ import {
   getNotificationSettings,
   getNotifications,
   getProjects,
+  createProject as createProjectRequest,
   markNotificationRead,
   updateNotificationSettings,
 } from "../api/platform";
@@ -63,10 +64,12 @@ import type {
   ProjectData,
   QueueCreatePayload,
   QueueData,
+  QueueStatus,
   ReviewDecision,
   RunKind,
   TaskCreatePayload,
   TaskData,
+  TaskStatus,
 } from "../types/task";
 
 const TASK_STORAGE_KEY = "codex-orchestrator:last-task-id";
@@ -177,7 +180,7 @@ export function deliveryProgressFor(
       ? `Archiver 写入知识失败${knowledgeProgress}`
       : "Archiver 处理失败";
   } else if (archiveUnavailable) {
-    archive = "Archiver 未启用，Commit 为交付终态";
+    archive = "Archiver 状态不可用，Commit 为交付终态";
   } else if (archiveCapabilityUnknown) {
     archive = "Archiver 状态待确认，Commit 已完成";
   } else if (outboxItems.length) {
@@ -243,6 +246,17 @@ function messageFrom(error: unknown, fallback: string): string {
     return details ? `${error.message}（${details}）` : error.message;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+export function isTransientRunArtifactNotFound(
+  error: unknown,
+  kind: RunKind,
+  status: TaskStatus | QueueStatus,
+): boolean {
+  return error instanceof ApiError
+    && error.status === 404
+    && ((kind === "task" && status === "accepted")
+      || (kind === "queue" && status === "pending"));
 }
 
 function setRefValue<T>(target: Ref<T>, value: T): void {
@@ -382,6 +396,14 @@ export function createOrchestrator() {
     writeStorage(kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY, runIdentifier);
   }
 
+  async function refreshProjects(): Promise<void> {
+    try {
+      projects.value = await getProjects();
+    } catch {
+      // Project runtime status is supplemental; do not interrupt task polling when it fails.
+    }
+  }
+
   function schedulePoll(): void {
     clearPollTimer();
     pollTimer = setTimeout(() => void refreshCurrent(), POLL_INTERVAL_MS);
@@ -430,6 +452,19 @@ export function createOrchestrator() {
       eventIntegrity.value = page.integrity;
       logs.value = availableLogs;
     } catch (error) {
+      if (
+        currentKind.value
+        && identifier.value
+        && ((currentKind.value === "task" && task.value)
+          || (currentKind.value === "queue" && queue.value))
+        && isTransientRunArtifactNotFound(
+          error,
+          currentKind.value,
+          currentKind.value === "task"
+            ? task.value!.status
+            : queue.value!.status,
+        )
+      ) return;
       recordError(error, "事件或日志读取失败。");
     }
   }
@@ -482,7 +517,11 @@ export function createOrchestrator() {
       task.value = latest;
       pageError.value = "";
       if (remember) rememberRun("task", taskId);
-      await Promise.all([loadTaskArtifacts(taskId), refreshEventsAndLogs()]);
+      await Promise.all([
+        loadTaskArtifacts(taskId),
+        refreshEventsAndLogs(),
+        refreshProjects(),
+      ]);
       if (shouldPollTask(latest)) {
         schedulePoll();
       } else {
@@ -519,7 +558,11 @@ export function createOrchestrator() {
       queue.value = latest;
       pageError.value = "";
       if (remember) rememberRun("queue", queueId);
-      const requests: Promise<void>[] = [loadQueueArtifacts(queueId), refreshEventsAndLogs()];
+      const requests: Promise<void>[] = [
+        loadQueueArtifacts(queueId),
+        refreshEventsAndLogs(),
+        refreshProjects(),
+      ];
       if (latest.current_task_id) requests.push(loadQueueTask(latest.current_task_id));
       await Promise.all(requests);
       if (ACTIVE_QUEUE_STATUSES.has(latest.status)) {
@@ -571,6 +614,23 @@ export function createOrchestrator() {
     const stored = readStoredRuns()[projectId];
     if (stored?.identifier && ["task", "queue"].includes(stored.kind)) {
       await activateRun(stored.kind, stored.identifier);
+    }
+  }
+
+  async function createProject(payload: {
+    name: string;
+    repo_path: string;
+    backend_architecture_enabled?: boolean;
+  }): Promise<ProjectData | null> {
+    pageError.value = "";
+    try {
+      const created = await createProjectRequest(payload);
+      projects.value = [...projects.value, created];
+      await selectProject(created.project_id, false);
+      return created;
+    } catch (error) {
+      recordError(error, "项目创建失败；尚未注册新项目。 ");
+      return null;
     }
   }
 
@@ -697,7 +757,7 @@ export function createOrchestrator() {
       task.value = accepted;
       rememberRun("task", accepted.task_id);
       schedulePoll();
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       connectEventStream();
       return accepted;
     } catch (error) {
@@ -717,7 +777,7 @@ export function createOrchestrator() {
       queue.value = accepted;
       rememberRun("queue", accepted.queue_id);
       schedulePoll();
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       connectEventStream();
       return accepted;
     } catch (error) {
@@ -843,7 +903,7 @@ export function createOrchestrator() {
         reviewer,
       });
       task.value = updated;
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       return true;
     } catch (error) {
       recordError(error, "GitHub 发布失败。");
@@ -1016,6 +1076,7 @@ export function createOrchestrator() {
     resetRun,
     activateRun,
     selectProject,
+    createProject,
     refreshCurrent,
     refreshEventsAndLogs,
     submitTask,

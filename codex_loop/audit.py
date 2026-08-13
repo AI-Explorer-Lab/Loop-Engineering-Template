@@ -25,6 +25,7 @@ from .state import (
     redact_sensitive_data,
     redact_sensitive_text,
 )
+from .workspace import HARNESS_RUNTIME_PATHSPEC
 
 
 class AuditRecorder:
@@ -652,7 +653,7 @@ class AuditRecorder:
         arguments = ["diff", "--binary", "--find-renames"]
         if not self.inherited_baseline:
             arguments.append(self.base_commit)
-        arguments.append("--")
+        arguments.extend(("--", ".", HARNESS_RUNTIME_PATHSPEC))
         tracked = self._git_bytes(*arguments)
         chunks = [tracked]
         for path in self._untracked_paths():
@@ -670,7 +671,13 @@ class AuditRecorder:
 
     def _cumulative_diff(self) -> bytes:
         tracked = self._git_bytes(
-            "diff", "--binary", "--find-renames", self.base_commit, "--"
+            "diff",
+            "--binary",
+            "--find-renames",
+            self.base_commit,
+            "--",
+            ".",
+            HARNESS_RUNTIME_PATHSPEC,
         )
         chunks = [tracked]
         for path in self._untracked_paths():
@@ -713,7 +720,7 @@ class AuditRecorder:
         arguments = ["diff", "--name-status", "-z", "--find-renames"]
         if not self.inherited_baseline:
             arguments.append(self.base_commit)
-        arguments.append("--")
+        arguments.extend(("--", ".", HARNESS_RUNTIME_PATHSPEC))
         raw = self._git_bytes(*arguments)
         parts = raw.decode("utf-8", errors="surrogateescape").split("\0")
         statuses: dict[str, str] = {}
@@ -741,7 +748,7 @@ class AuditRecorder:
         arguments = ["diff", "--numstat", "--find-renames"]
         if not self.inherited_baseline:
             arguments.append(self.base_commit)
-        arguments.append("--")
+        arguments.extend(("--", ".", HARNESS_RUNTIME_PATHSPEC))
         text = self._git_text(*arguments)
         values: dict[str, tuple[int, int]] = {}
         for line in text.splitlines():
@@ -754,7 +761,15 @@ class AuditRecorder:
         return values
 
     def _untracked_paths(self) -> list[str]:
-        raw = self._git_bytes("ls-files", "--others", "--exclude-standard", "-z")
+        raw = self._git_bytes(
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ".",
+            HARNESS_RUNTIME_PATHSPEC,
+        )
         return sorted(
             path
             for path in raw.decode("utf-8", errors="surrogateescape").split("\0")

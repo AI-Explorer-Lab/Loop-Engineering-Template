@@ -18,7 +18,7 @@ from .models import (
     utc_now_iso,
 )
 from .state import StateStore, _atomic_write_json, redact_sensitive_text
-from .workspace import PROTECTED_BRANCHES
+from .workspace import HARNESS_RUNTIME_PATHSPEC, PROTECTED_BRANCHES
 
 
 class DeliveryError(InfrastructureError):
@@ -325,7 +325,15 @@ class GitDeliveryService:
             raise DeliveryError("unknown HEAD subject found during commit recovery")
         if branch != str(intent["branch"]):
             raise DeliveryError("task branch changed during commit recovery")
-        if self._git(worktree, "status", "--porcelain", "--untracked-files=all"):
+        if self._git(
+            worktree,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            ".",
+            HARNESS_RUNTIME_PATHSPEC,
+        ):
             raise DeliveryError("task worktree is not clean after commit")
         metadata = self._commit_metadata(worktree, commit_sha)
         record = {

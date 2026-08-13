@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import CheckpointDetailDrawer, { type CheckpointKey } from "../components/CheckpointDetailDrawer.vue";
 import EventTimeline from "../components/EventTimeline.vue";
 import QueueProgress from "../components/QueueProgress.vue";
 import TaskStatus from "../components/TaskStatus.vue";
@@ -9,6 +10,7 @@ import { useOrchestrator } from "../composables/useOrchestrator";
 
 const store = useOrchestrator();
 const confirmCancel = ref(false);
+const selectedCheckpoint = ref<CheckpointKey | null>(null);
 
 const canPause = computed(() => {
   const status = store.runStatus.value;
@@ -46,13 +48,29 @@ const planCheckpoint = computed(() =>
 const harnessCheckpoints = computed(() => {
   const task = store.task.value;
   return [
-    { label: "Planner", value: planCheckpoint.value },
-    { label: "Context", value: task && Object.keys(task.context).length ? "快照已冻结" : "该记录不具备" },
-    { label: "四层评估", value: task && Object.keys(task.evaluations).length ? "结果已持久化" : "尚未产出" },
-    { label: "Commit", value: task?.commit.commit_sha ? String(task.commit.commit_sha).slice(0, 10) : task?.delivery_status || "not_ready" },
-    { label: "Archive", value: task?.delivery_status === "archived" ? "已完成" : task?.archive.outbox ? "已有检查点" : "尚未开始" },
+    { key: "planner", label: "Planner", value: planCheckpoint.value },
+    { key: "context", label: "Context", value: task && Object.keys(task.context).length ? "快照已冻结" : "该记录不具备" },
+    { key: "evaluations", label: "四层评估", value: task && Object.keys(task.evaluations).length ? "结果已持久化" : "尚未产出" },
+    { key: "commit", label: "Commit", value: task?.commit.commit_sha ? String(task.commit.commit_sha).slice(0, 10) : task?.delivery_status || "not_ready" },
+    { key: "archive", label: "Archive", value: task?.delivery_status === "archived" ? "已完成" : task?.archive.outbox ? "已有检查点" : "尚未开始" },
   ];
 });
+
+const detailCheckpoints = computed(() =>
+  harnessCheckpoints.value.filter((item) => item.key !== "planner") as Array<{
+    key: CheckpointKey;
+    label: string;
+    value: string;
+  }>,
+);
+
+function openCheckpoint(checkpoint: CheckpointKey): void {
+  selectedCheckpoint.value = checkpoint;
+}
+
+function closeCheckpoint(): void {
+  selectedCheckpoint.value = null;
+}
 
 async function cancel(): Promise<void> {
   confirmCancel.value = false;
@@ -98,7 +116,15 @@ async function cancel(): Promise<void> {
       <section v-if="store.task.value" class="surface harness-checkpoints" data-test="harness-checkpoints">
         <div class="surface-heading compact-heading"><div><span class="section-kicker">Harness 控制面</span><h2>阶段检查点</h2></div></div>
         <div class="checkpoint-grid">
-          <div v-for="item in harnessCheckpoints" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div>
+          <div class="checkpoint-card checkpoint-card-static"><span>Planner</span><strong>{{ planCheckpoint }}</strong></div>
+          <button
+            v-for="item in detailCheckpoints"
+            :key="item.label"
+            class="checkpoint-card"
+            :data-test="`checkpoint-${item.key}`"
+            type="button"
+            @click="openCheckpoint(item.key)"
+          ><span>{{ item.label }}</span><strong>{{ item.value }}</strong></button>
         </div>
       </section>
 
@@ -141,5 +167,12 @@ async function cancel(): Promise<void> {
         <div class="dialog-actions"><button class="secondary-button" type="button" @click="confirmCancel = false">返回</button><button class="primary-button danger-primary" type="button" @click="cancel">确认取消</button></div>
       </div>
     </div>
+
+    <CheckpointDetailDrawer
+      v-if="selectedCheckpoint && store.task.value"
+      :task="store.task.value"
+      :checkpoint="selectedCheckpoint"
+      @close="closeCheckpoint"
+    />
   </div>
 </template>

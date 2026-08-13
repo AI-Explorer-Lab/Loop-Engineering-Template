@@ -30,6 +30,16 @@ class ProjectData(BaseModel):
     is_default: bool
     active_identifier: str | None = None
     knowledge_actor_id: str = ""
+    publish_enabled: bool = False
+    publish_auto_create_remote: bool = False
+    publish_remote_name: str = "origin"
+    publish_remote_url: str = ""
+    publish_repository_name: str = ""
+    publish_branch: str = ""
+    backend_architecture_enabled: bool = False
+    backend_architecture_knowledge_id: str = "TK-DEC-001"
+    backend_architecture_status: str = "disabled"
+    backend_architecture_snapshot_sha256: str = ""
 
 
 class HistoryItemData(BaseModel):

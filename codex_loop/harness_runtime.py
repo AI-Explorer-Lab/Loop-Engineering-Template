@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .archiver import ArchiveCoordinator
 from .audit import AuditRecorder
+from .backend_architecture_bootstrap import BackendArchitectureBootstrap
 from .context import ContextAssembler, ContextSnapshot
 from .evaluation import EvaluationCoordinator
 from .knowledge import KnowledgeGateway
@@ -35,6 +36,7 @@ class HarnessRuntime:
         mcp_registry: str | Path,
         validation_timeout_seconds: float = 900.0,
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
+        backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.project_id = str(project_id)
@@ -47,7 +49,8 @@ class HarnessRuntime:
             if isinstance(validation_profile, ValidationProfile)
             else ValidationProfile.from_mapping(validation_profile)
         )
-        self.registry = json.loads(self.mcp_registry.read_text(encoding="utf-8"))
+        self.backend_architecture_bootstrap = backend_architecture_bootstrap
+        self._registry: dict[str, Any] | None = None
 
     def context_assembler(self) -> ContextAssembler:
         client = LocalMcpClient(self.mcp_registry, mode="read")
@@ -82,6 +85,7 @@ class HarnessRuntime:
             evaluation_coordinator=EvaluationCoordinator(roles),
             knowledge_actor_id=self.knowledge_actor_id,
             validation_profile=self.validation_profile,
+            backend_architecture_bootstrap=self.backend_architecture_bootstrap,
         )
 
     def queue_workflow(self) -> QueueWorkflow:
@@ -96,6 +100,16 @@ class HarnessRuntime:
             ),
             archive_callback=self.archive,
             validation_profile=self.validation_profile,
+            bootstrap_complete_callback=(
+                None
+                if self.backend_architecture_bootstrap is None
+                else self.backend_architecture_bootstrap.mark_delivered
+            ),
+            bootstrap_failed_callback=(
+                None
+                if self.backend_architecture_bootstrap is None
+                else self.backend_architecture_bootstrap.mark_failed
+            ),
         )
 
     def planner(self) -> PlannerService:
@@ -123,12 +137,16 @@ class HarnessRuntime:
         assembler.event_sink = sink
         assembler.knowledge.client.event_sink = sink
         assembler.skills.client.event_sink = sink
+        excluded = {self.backend_architecture_bootstrap.knowledge_id} if (
+            self.backend_architecture_bootstrap is not None
+        ) else set()
         return assembler.assemble(
             path=directory / "context.json",
             stage="planner",
             query=query,
             actor=self.knowledge_actor_id,
             include_memory=True,
+            exclude_knowledge_ids=excluded,
         )
 
     def archive(self, task_id: str, *, store: StateStore | None = None) -> dict[str, Any]:
@@ -159,6 +177,11 @@ class HarnessRuntime:
                     run_dir / "changes" / "files.json"
                 ).get("files", [])
             ],
+            exclude_knowledge_ids=(
+                {self.backend_architecture_bootstrap.knowledge_id}
+                if self.backend_architecture_bootstrap is not None
+                else set()
+            ),
         )
         coordinator = ArchiveCoordinator(
             self.repo_root,
@@ -223,7 +246,7 @@ class HarnessRuntime:
         read_client = LocalMcpClient(self.mcp_registry, mode="read")
         archive_client = LocalMcpClient(self.mcp_registry, mode="archive")
         skills = read_client.call_tool("skill_list", {})
-        roots = dict(self.registry.get("roots", {}))
+        roots = dict(self._load_registry().get("roots", {}))
         return {
             "status": "healthy",
             "knowledge_base_path": str(roots.get("knowledge", "")),
@@ -243,6 +266,14 @@ class HarnessRuntime:
             if self._optional_json(path).get("status") != "completed":
                 count += 1
         return count
+
+    def _load_registry(self) -> dict[str, Any]:
+        if self._registry is None:
+            value = json.loads(self.mcp_registry.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                raise RuntimeError("MCP registry must contain an object")
+            self._registry = value
+        return self._registry
 
     @staticmethod
     def _optional_json(path: Path) -> dict[str, Any]:

@@ -18,9 +18,7 @@ const emit = defineEmits<{
   confirm: [payload: { reviewer: string; draft: PlanDraft }];
 }>();
 
-const name = ref("");
 const requirement = ref("");
-const criteria = ref([""]);
 const reviewer = ref("");
 const edited = ref<PlanDraft | null>(null);
 const formError = ref("");
@@ -48,36 +46,16 @@ watch(
   { immediate: true },
 );
 
-function addCriterion(): void {
-  criteria.value.push("");
-}
-
-function removeCriterion(index: number): void {
-  if (criteria.value.length === 1) return;
-  criteria.value.splice(index, 1);
-}
-
 function generate(): void {
-  const normalizedName = name.value.trim();
   const normalizedRequirement = requirement.value.trim();
-  const normalizedCriteria = criteria.value.map((item) => item.trim());
-  if (!normalizedName) {
-    formError.value = "请填写任务名称。";
-    return;
-  }
   if (!normalizedRequirement) {
     formError.value = "请填写完整需求。";
     return;
   }
-  if (normalizedCriteria.some((item) => !item)) {
-    formError.value = "每条验收标准都需要填写。";
-    return;
-  }
   formError.value = "";
   emit("generate", {
-    name: normalizedName,
     requirement: normalizedRequirement,
-    acceptance_criteria: normalizedCriteria,
+    acceptance_criteria: [],
   });
 }
 
@@ -155,22 +133,10 @@ function confirm(): void {
 
 <template>
   <form v-if="!edited" class="task-form plan-input-form" data-test="plan-form" @submit.prevent="generate">
-    <label>任务名称
-      <input v-model="name" data-test="plan-name" :disabled="disabled || planning" placeholder="例如：交易模块整理" />
-    </label>
     <label>完整需求
-      <textarea v-model="requirement" data-test="plan-requirement" :disabled="disabled || planning" placeholder="描述最终结果和明确边界；Planner 只负责拆分与排序。" />
+      <textarea v-model="requirement" data-test="plan-requirement" :disabled="disabled || planning" placeholder="描述最终结果和明确边界；Codex 会生成验收标准和执行切片。" />
     </label>
-    <fieldset class="criteria">
-      <legend>原始验收标准</legend>
-      <p class="field-hint">Planner 只能映射这些标准，不能新增标准或依赖。</p>
-      <div v-for="(_, index) in criteria" :key="index" class="criterion-row">
-        <span class="criterion-index">{{ index + 1 }}</span>
-        <input v-model="criteria[index]" :data-test="`plan-criterion-${index}`" :disabled="disabled || planning" :placeholder="`可观察结果 ${index + 1}`" />
-        <button class="icon-button" type="button" :aria-label="`删除验收标准 ${index + 1}`" :disabled="criteria.length === 1 || disabled || planning" @click="removeCriterion(index)">×</button>
-      </div>
-      <button class="text-action" type="button" data-test="add-plan-criterion" :disabled="disabled || planning" @click="addCriterion">＋ 添加验收标准</button>
-    </fieldset>
+    <p class="field-hint plan-generation-hint">你只需要描述想要的结果。Codex 会根据需求生成可观察的验收标准，并在执行前展示给你确认。</p>
     <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
     <button class="primary-button" type="submit" data-test="generate-plan" :disabled="disabled || planning">
       {{ planning ? "正在生成草稿…" : "生成 Plan 草稿" }}
@@ -204,7 +170,7 @@ function confirm(): void {
         <label>标题<input v-model="subtask.title" :data-test="`plan-subtask-title-${index}`" :disabled="confirming" /></label>
         <label>需求切片<textarea v-model="subtask.requirement_slice" :data-test="`plan-subtask-requirement-${index}`" rows="3" :disabled="confirming" /></label>
         <fieldset>
-          <legend>映射原始验收标准</legend>
+          <legend>复核 Codex 生成的验收标准</legend>
           <label v-for="([id, criterion]) in acceptanceEntries" :key="id" class="acceptance-option">
             <input v-model="subtask.source_acceptance_ids" type="checkbox" :value="id" :disabled="confirming" />
             <span><code>{{ id }}</code>{{ criterion }}</span>

@@ -15,6 +15,8 @@ Loop-Engineering-Template/
 
 被管理项目/
 ├── .git/
+├── .harness/
+│   └── project.json             Harness 项目配置（纳入 Git）
 ├── .codex-orchestrator/
 │   ├── worktrees/<task-id>/       codex/<task-id> 专用工作区
 │   ├── runs/<task-id>/            单任务状态、事件和审计产物
@@ -35,7 +37,7 @@ Loop-Engineering-Template/
    ↓
 任务分支单次 commit → 本地归档/中期记忆 → 可选 KB outbox
    ↓
-单任务再次确认 → 核验固定远端与 commit → 推送任务分支（可选）
+单任务再次确认 → 核验固定远端与 commit → 推送任务分支或新项目的 main（可选）
 ```
 
 长任务由人工或 Planner 给出严格顺序。每个子任务机器验证通过并经人工批准后，累计 Diff 才会成为下一 worktree 的 index 基线。
@@ -55,24 +57,36 @@ npm ci --prefix frontend
 
 ## 本地配置
 
-默认配置可以直接启动并管理本仓库，增强 Harness 默认关闭。需要连接外部项目、Knowledge-Base 或 MCP 时：
+Harness 是 Loop-Engineering 的固定运行前提。启动前必须在本地配置外部 Knowledge-Base 和 MCP 路径：
 
 ```bash
 cp backend/config/app.local.example.yaml \
   backend/config/app.local.yaml
 ```
 
-然后在忽略提交的 `app.local.yaml` 中填写：
+然后在忽略提交的 `app.local.yaml` 中保留服务级配置和已有项目；新项目通过前端项目页的“新建项目”创建，不需要手动编辑项目列表。项目创建后会写入控制面忽略目录中的 `projects.json`。
+
+服务级配置包括：
 
 - 外部 Knowledge-Base 根目录；
 - 外部 MCP `registry.json`；
-- 每个被管理项目的绝对路径和知识身份；
+- 已有被管理项目的绝对路径和知识身份；
 - 可选的固定发布远端（`publish.enabled`、`remote_name`、`remote_url`）；
-- 项目自己的验证命令、测试目录和依赖目录。
+- 新项目可配置首次发布目标分支（`publish.branch`，默认 `main`）；
+- 项目自己的验证命令、测试目录和依赖目录。通过前端创建的新项目使用默认 Python `unittest` 验证配置。
+- 项目级 `backend_architecture_enabled`：启用后，首次开发任务固定读取 MCP 知识 `TK-DEC-001`，完成一次后状态冻结为 `completed`，后续任务不再自动读取该架构知识。
 
 验证命令是控制面可信配置，不接受模型动态生成；它们以参数数组保存，通过 `shell=False` 在原有外部沙箱中执行。
 
-`agent.harness_enabled=true` 时，必须配置外部 Knowledge-Base 和 MCP registry。两者不随本仓库分发，路径不存在时服务会明确拒绝启动。MCP 使用本机 `stdio`，read/archive 模式严格分离并禁用网络；Generator 只接收冻结后的来源与哈希，不直接调用 MCP。
+外部 Knowledge-Base 和 MCP registry 不随本仓库分发，路径不存在时服务会明确拒绝启动。MCP 使用本机 `stdio`，read/archive 模式严格分离并禁用网络；Generator 只接收冻结后的来源与哈希，不直接调用 MCP。系统不存在无 Harness 的降级运行模式。
+
+## GitHub 认证
+
+发布功能通过 GitHub CLI（`gh`）使用本机已保存的 GitHub 凭据。凭据失效或权限过期时，执行下面的命令重新认证：
+
+```bash
+gh auth refresh -h github.com
+```
 
 ## 启动
 
@@ -124,7 +138,7 @@ conda run -n loop-engineering python -m codex_loop \
 - `machine_status=infrastructure_error`：隔离、权限、SDK 或本地工具故障。
 - `review_status=pending`：机器流程结束，但尚无人工结论。
 - `delivery_status`：独立记录 commit 与 archive 的可恢复检查点。
-- `publish.status=published`：已将已审核、已 commit、已归档的单任务分支推送到配置的固定远端。
+- `publish.status=published`：已将已审核、已 commit、已归档的单任务结果推送到配置的固定远端；通过前端创建的新项目首次发布默认将任务分支快进到本地 `main`，再推送远端 `main`。
 - 长任务只有当前子任务 `approved` 后才进入下一项。
 
 `active.lock` 只表示进程当前占用执行权。进程异常退出后可以替换过期锁，但必须恢复未完成任务，不能用新任务覆盖。
@@ -139,7 +153,7 @@ conda run -n loop-engineering python -m codex_loop \
 - App Server 的实际权限无法证明不宽于请求范围时，首个 Prompt 前停止。
 - `.codex-orchestrator/` 位于每个被管理项目中，不提交到本仓库。
 - 审核批准只在 `codex/<task-id>` 任务分支创建一次提交；审核接口不会 merge、push、创建 PR 或部署。
-- 发布是独立的显式操作：只允许单任务在审核通过、commit 和归档完成后，核对 worktree、分支、HEAD、工作区和固定远端成功后 push；不会 merge、创建 PR 或部署。
+- 发布是独立的显式操作：只允许单任务在审核通过、commit 和归档完成后，核对 worktree、分支、HEAD、工作区和固定远端成功后 push；新项目首次发布会将本地 `main` 快进到已审核 commit，不创建 PR 或部署。
 
 ## 运行记录
 

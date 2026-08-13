@@ -41,8 +41,10 @@ export interface ReviewPayload {
   commit_subject: string;
 }
 
-export interface PlanCreatePayload extends TaskCreatePayload {
-  name: string;
+export interface PlanCreatePayload {
+  name?: string;
+  requirement: string;
+  acceptance_criteria?: string[];
 }
 
 export interface PlannedSubtask {
@@ -211,6 +213,16 @@ export interface ProjectData {
   is_default: boolean;
   active_identifier: string | null;
   knowledge_actor_id: string;
+  publish_enabled?: boolean;
+  publish_auto_create_remote?: boolean;
+  publish_remote_name?: string;
+  publish_remote_url?: string;
+  publish_repository_name?: string;
+  publish_branch?: string;
+  backend_architecture_enabled?: boolean;
+  backend_architecture_knowledge_id?: string;
+  backend_architecture_status?: string;
+  backend_architecture_snapshot_sha256?: string;
 }
 
 export interface HistoryItemData {

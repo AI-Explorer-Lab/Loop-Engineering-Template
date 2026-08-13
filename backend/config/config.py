@@ -10,6 +10,9 @@ from typing import Any
 from dynaconf import Dynaconf
 
 from codex_loop.validation_profile import ValidationProfile
+from codex_loop.backend_architecture_bootstrap import BACKEND_ARCHITECTURE_KNOWLEDGE_ID
+
+from .project_store import load_created_projects
 
 
 CONFIG_FILE = Path(__file__).with_name("app.yaml")
@@ -52,6 +55,13 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
 
     agent = config.get("agent", {}) or {}
     configured = agent.get("projects", []) or []
+    if isinstance(configured, (str, bytes)):
+        raise RuntimeError("agent.projects must be a list")
+    created_projects = [
+        {**item, "_created_from_registry": True}
+        for item in load_created_projects(config)
+    ]
+    configured = [*configured, *created_projects]
     if not configured:
         root = repo_root_from_settings(config)
         return [
@@ -66,10 +76,12 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "validation_profile": ValidationProfile.from_mapping(
                     agent.get("validation")
                 ),
+                "backend_architecture_enabled": bool(
+                    agent.get("backend_architecture_enabled", False)
+                ),
+                "backend_architecture_knowledge_id": BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             }
         ]
-    if isinstance(configured, (str, bytes)):
-        raise RuntimeError("agent.projects must be a list")
     projects: list[dict[str, object]] = []
     seen: set[str] = set()
     for index, item in enumerate(configured):
@@ -105,8 +117,21 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "knowledge_actor_id": str(
                     item.get("knowledge_actor_id", "")
                 ).strip(),
+                "_created_from_registry": bool(
+                    item.get("_created_from_registry", False)
+                ),
                 "validation_profile": validation_profile,
                 "publish": item.get("publish", {}),
+                "backend_architecture_enabled": bool(
+                    item.get("backend_architecture_enabled", False)
+                ),
+                "backend_architecture_knowledge_id": str(
+                    item.get(
+                        "backend_architecture_knowledge_id",
+                        BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
+                    )
+                ).strip()
+                or BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             }
         )
     defaults = [item for item in projects if item["is_default"]]
@@ -116,7 +141,7 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
 
 
 def knowledge_from_settings(config: Any = settings) -> dict[str, object]:
-    """Resolve optional external Knowledge-Base and MCP paths from repo-local config."""
+    """Resolve the required external Knowledge-Base and MCP paths."""
 
     agent = config.get("agent", {}) or {}
     knowledge = agent.get("knowledge", {}) or {}
@@ -151,19 +176,18 @@ def validate_settings(config: Any = settings) -> None:
     if max_parallel < 1:
         raise RuntimeError("agent.max_parallel_projects must be at least 1")
 
-    if bool(agent.get("harness_enabled", False)):
-        knowledge = knowledge_from_settings(config)
-        knowledge_root = knowledge.get("repo_root")
-        registry_path = knowledge.get("mcp_registry")
-        writer = str(knowledge.get("knowledge_writer_actor_id", "")).strip()
-        if not isinstance(knowledge_root, Path) or not knowledge_root.is_dir():
-            raise RuntimeError("agent.knowledge.repo_root must exist")
-        if not isinstance(registry_path, Path) or not registry_path.is_file():
-            raise RuntimeError("agent.knowledge.mcp_registry must exist")
-        if not writer:
-            raise RuntimeError(
-                "agent.knowledge.knowledge_writer_actor_id must not be blank"
-            )
+    knowledge = knowledge_from_settings(config)
+    knowledge_root = knowledge.get("repo_root")
+    registry_path = knowledge.get("mcp_registry")
+    writer = str(knowledge.get("knowledge_writer_actor_id", "")).strip()
+    if not isinstance(knowledge_root, Path) or not knowledge_root.is_dir():
+        raise RuntimeError("agent.knowledge.repo_root must exist")
+    if not isinstance(registry_path, Path) or not registry_path.is_file():
+        raise RuntimeError("agent.knowledge.mcp_registry must exist")
+    if not writer:
+        raise RuntimeError(
+            "agent.knowledge.knowledge_writer_actor_id must not be blank"
+        )
 
     for project in projects_from_settings(config):
         repo_root = Path(project["repo_root"])
@@ -171,9 +195,7 @@ def validate_settings(config: Any = settings) -> None:
             raise RuntimeError(
                 f"project repo_root does not exist: {repo_root}"
             )
-        if bool(agent.get("harness_enabled", False)) and not str(
-            project.get("knowledge_actor_id", "")
-        ).strip():
+        if not str(project.get("knowledge_actor_id", "")).strip():
             raise RuntimeError(
                 f"project {project['project_id']} has no knowledge_actor_id"
             )

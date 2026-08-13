@@ -232,6 +232,81 @@ describe("App workbench", () => {
     wrapper.unmount();
   });
 
+  it("refreshes the project runtime status when a task starts and is polled", async () => {
+    const idleProject = {
+      project_id: "default",
+      name: "Accounting-Software",
+      repo_root: "/repo",
+      is_default: true,
+      active_identifier: null,
+      knowledge_actor_id: "zhangsan",
+    };
+    const runningProject = { ...idleProject, active_identifier: "task-1" };
+    platformApi.getProjects
+      .mockReset()
+      .mockResolvedValueOnce([idleProject])
+      .mockResolvedValue([runningProject]);
+    taskApi.createTask.mockResolvedValue(task("accepted"));
+    taskApi.getTask.mockResolvedValue(task("running"));
+    const { wrapper, router } = await mountAt("/create");
+
+    await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
+    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="task-form"]').trigger("submit");
+    await flushPromises();
+
+    await router.push("/projects");
+    await flushPromises();
+    expect(wrapper.get(".project-runtime").text()).toContain("运行中 · task-1");
+    expect(platformApi.getProjects).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(platformApi.getProjects).toHaveBeenCalledTimes(3);
+    wrapper.unmount();
+  });
+
+  it("opens checkpoint details from the clickable cards while leaving Planner static", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    taskApi.getTask.mockResolvedValue(task("success", {
+      context: {
+        evaluation: {
+          context_sha256: "c".repeat(64),
+          stage: "evaluation",
+          knowledge: [{ knowledge_id: "k-1", title: "评估规则", type: "guideline", revision: 2 }],
+        },
+      },
+      evaluations: {
+        aggregate: {
+          context_sha256: "d".repeat(64),
+          syntax: { status: "passed" },
+          logic: { status: "passed" },
+          specification: { status: "passed" },
+          architecture: { status: "not_evaluated" },
+        },
+      },
+      commit: { commit_sha: "e".repeat(40) },
+      delivery_status: "archived",
+      archive: { summary: { delivery_status: "archived" }, outbox: { status: "completed" } },
+    }));
+    const { wrapper } = await mountAt("/monitor");
+
+    expect(wrapper.get(".checkpoint-card-static").text()).toContain("Planner");
+    expect(wrapper.get('[data-test="checkpoint-context"]').element.tagName).toBe("BUTTON");
+    expect(wrapper.find('[data-test="checkpoint-planner"]').exists()).toBe(false);
+
+    await wrapper.get('[data-test="checkpoint-context"]').trigger("click");
+    expect(wrapper.get('[data-test="checkpoint-detail-backdrop"]').text()).toContain("Context 快照详情");
+    expect(wrapper.text()).toContain("评估规则");
+
+    await wrapper.get('[aria-label="关闭检查点详情"]').trigger("click");
+    expect(wrapper.find('[data-test="checkpoint-detail-backdrop"]').exists()).toBe(false);
+
+    await wrapper.get('[data-test="checkpoint-evaluations"]').trigger("click");
+    expect(wrapper.get('[data-test="checkpoint-detail-backdrop"]').text()).toContain("四层评估详情");
+    wrapper.unmount();
+  });
+
   it("restores a legacy storage reference and shows the persisted diff", async () => {
     localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
     taskApi.getTask.mockResolvedValue(task("success"));
@@ -282,16 +357,13 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="auto-mode"]').trigger("click");
-    await wrapper.get('[data-test="plan-name"]').setValue("Filtering plan");
     await wrapper.get('[data-test="plan-requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="plan-criterion-0"]').setValue("Filtering works");
     await wrapper.get('[data-test="plan-form"]').trigger("submit");
     await flushPromises();
 
     expect(planApi.createPlan).toHaveBeenCalledWith({
-      name: "Filtering plan",
       requirement: "Add filtering",
-      acceptance_criteria: ["Filtering works"],
+      acceptance_criteria: [],
     });
     expect(taskApi.createTask).not.toHaveBeenCalled();
     expect(wrapper.get('[data-test="plan-preview"]').text()).toContain("AC-001");
@@ -463,7 +535,7 @@ describe("App workbench", () => {
     platformApi.getCapabilities.mockResolvedValue({
       status: "unavailable",
       project_id: "default",
-      reason: "harness feature is disabled",
+      reason: "MCP capability unavailable",
     });
     platformApi.getMetrics.mockRejectedValue(new Error("metrics unavailable"));
     const committed = task("success", {
@@ -493,7 +565,7 @@ describe("App workbench", () => {
     await wrapper.get('[data-test="confirm-review"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-test="review-panel"]').text()).toContain(
-      "Archiver 未启用，Commit 为交付终态",
+      "Archiver 状态不可用，Commit 为交付终态",
     );
 
     await vi.advanceTimersByTimeAsync(2_000);

@@ -8,11 +8,14 @@ from fastapi.testclient import TestClient
 from backend.main import create_app
 from backend.service.platform_service import PlatformService
 from backend.service.project_registry import ProjectRegistry
+from codex_loop.harness_runtime import HarnessRuntime
 from codex_loop.models import TaskSpec
 from codex_loop.state import StateStore
 
 
 def _config(repo_root: Path) -> dict[str, object]:
+    mcp_registry = repo_root / "mcp-registry.json"
+    mcp_registry.write_text(json.dumps({"roots": {}}), encoding="utf-8")
     return {
         "environment": {"name": "test", "debug": False},
         "server": {"cors_origins": ["http://localhost"]},
@@ -26,8 +29,14 @@ def _config(repo_root: Path) -> dict[str, object]:
                     "name": "Accounting",
                     "repo_root": str(repo_root),
                     "default": True,
+                    "knowledge_actor_id": "local-user",
                 }
             ],
+            "knowledge": {
+                "repo_root": str(repo_root),
+                "mcp_registry": str(mcp_registry),
+                "knowledge_writer_actor_id": "orchestrator",
+            },
         },
         "notifications": {},
     }
@@ -60,10 +69,20 @@ def _persist_completed_task(repo_root: Path) -> TaskSpec:
 
 def test_projects_history_events_logs_and_notifications_share_persisted_state(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     repo_root = tmp_path / "accounting"
     repo_root.mkdir()
     task = _persist_completed_task(repo_root)
+    monkeypatch.setattr(
+        HarnessRuntime,
+        "capabilities",
+        lambda self: {
+            "status": "healthy",
+            "mcp_read": {"transport": "stdio"},
+            "archive_backlog": 0,
+        },
+    )
     app = create_app(config=_config(repo_root), validate_config=False)
 
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -113,6 +132,9 @@ def test_projects_history_events_logs_and_notifications_share_persisted_state(
 
     assert projects.status_code == 200
     assert projects.json()["data"][0]["project_id"] == "accounting"
+    assert projects.json()["data"][0]["publish_repository_name"] == "accounting"
+    assert projects.json()["data"][0]["publish_enabled"] is False
+    assert projects.json()["data"][0]["publish_auto_create_remote"] is False
     assert history.json()["data"]["total"] == 1
     assert history.json()["data"]["items"][0]["identifier"] == task.task_id
     assert events.json()["data"]["items"][0]["type"] == "run.completed"
@@ -134,11 +156,10 @@ def test_projects_history_events_logs_and_notifications_share_persisted_state(
         "email_configured": False,
         "webhook_configured": False,
     }
-    assert capabilities.json()["data"] == {
-        "status": "unavailable",
-        "project_id": "accounting",
-        "reason": "harness feature is disabled",
-    }
+    assert capabilities.status_code == 200
+    assert capabilities.json()["data"]["status"] == "healthy"
+    assert capabilities.json()["data"]["project_id"] == "accounting"
+    assert capabilities.json()["data"]["knowledge_actor_id"] == "local-user"
     assert metrics.json()["data"]["project_id"] == "accounting"
     assert metrics.json()["data"]["completed_tasks"] == 1
 

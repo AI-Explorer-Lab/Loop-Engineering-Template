@@ -46,17 +46,46 @@ class PlatformService:
         self._notification_lock = RLock()
 
     def projects(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "project_id": context.project_id,
-                "name": context.name,
-                "repo_root": str(context.repo_root),
-                "is_default": context.is_default,
-                "active_identifier": context.task_service.executor.active_task_id(),
-                "knowledge_actor_id": context.knowledge_actor_id,
-            }
-            for context in self.registry.all()
-        ]
+        return [self.project_data(context) for context in self.registry.all()]
+
+    @staticmethod
+    def project_data(context: ProjectContext) -> dict[str, Any]:
+        return {
+            "project_id": context.project_id,
+            "name": context.name,
+            "repo_root": str(context.repo_root),
+            "is_default": context.is_default,
+            "active_identifier": context.task_service.executor.active_task_id(),
+            "knowledge_actor_id": context.knowledge_actor_id,
+            "publish_enabled": context.publish_enabled,
+            "publish_auto_create_remote": context.publish_auto_create_remote,
+            "publish_remote_name": context.publish_remote_name,
+            "publish_remote_url": context.publish_remote_url,
+            "publish_repository_name": context.publish_repository_name,
+            "publish_branch": context.publish_branch,
+            "backend_architecture_enabled": context.backend_architecture_enabled,
+            "backend_architecture_knowledge_id": context.backend_architecture_knowledge_id,
+            "backend_architecture_status": context.backend_architecture_bootstrap.snapshot().get(
+                "status", "disabled"
+            ),
+            "backend_architecture_snapshot_sha256": context.backend_architecture_bootstrap.snapshot().get(
+                "snapshot_sha256", ""
+            ),
+        }
+
+    def create_project(
+        self,
+        *,
+        name: str,
+        repo_path: str,
+        backend_architecture_enabled: bool = False,
+    ) -> dict[str, Any]:
+        context = self.registry.create_project(
+            name=name,
+            repo_path=repo_path,
+            backend_architecture_enabled=backend_architecture_enabled,
+        )
+        return self.project_data(context)
 
     def history(
         self,
@@ -299,12 +328,6 @@ class PlatformService:
 
     def capabilities(self, project_id: str | None = None) -> dict[str, Any]:
         context = self.registry.get(project_id)
-        if context.harness is None:
-            return {
-                "status": "unavailable",
-                "project_id": context.project_id,
-                "reason": "harness feature is disabled",
-            }
         value = context.harness.capabilities()
         value["project_id"] = context.project_id
         value["knowledge_actor_id"] = context.knowledge_actor_id
@@ -362,9 +385,7 @@ class PlatformService:
                 committed += 1
             elif delivery.get("status") == "failed":
                 commit_failed += 1
-        backlog = (
-            context.harness._archive_backlog() if context.harness is not None else 0
-        )
+        backlog = context.harness._archive_backlog()
         return {
             "project_id": context.project_id,
             "task_success_rate": successes / completed if completed else None,

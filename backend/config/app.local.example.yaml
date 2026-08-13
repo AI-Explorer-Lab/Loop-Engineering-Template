@@ -2,7 +2,6 @@
 # Paths may be absolute or relative to the Loop-Engineering-Template root.
 development:
   agent:
-    harness_enabled: true
     knowledge:
       repo_root: /absolute/path/to/Knowledge-Base
       mcp_registry: /absolute/path/to/mcp/registry.json
@@ -18,6 +17,8 @@ development:
           enabled: true
           remote_name: origin
           remote_url: https://github.com/owner/my-project.git
+          # Optional. Newly-created projects default to main for first publication.
+          # branch: main
         validation:
           required_paths:
             - backend/tests

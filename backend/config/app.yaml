@@ -12,9 +12,7 @@ default:
     repo_root: null
     validation_timeout_seconds: 900
     max_parallel_projects: 2
-    # Enable after configuring the external Knowledge-Base and MCP paths in
-    # app.local.yaml. The integration code remains part of Orchestrator.
-    harness_enabled: false
+    # Harness is mandatory. Configure these external paths in app.local.yaml.
     knowledge:
       repo_root: null
       mcp_registry: null

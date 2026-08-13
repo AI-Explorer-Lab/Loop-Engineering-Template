@@ -169,6 +169,7 @@ class KnowledgeGateway:
         query: str,
         actor: str = "",
         changed_paths: list[str] | None = None,
+        exclude_knowledge_ids: set[str] | None = None,
     ) -> KnowledgeSelection:
         if stage not in STAGE_KNOWLEDGE_TYPES:
             raise ValueError(f"unsupported knowledge stage: {stage}")
@@ -193,7 +194,10 @@ class KnowledgeGateway:
         items: list[KnowledgeItem] = []
         warnings: list[str] = []
         remaining = budget["max_chars"]
+        excluded = {str(item).strip() for item in (exclude_knowledge_ids or set())}
         for result in searched.get("results", []):
+            if str(result.get("knowledge_id", "")).strip() in excluded:
+                continue
             if remaining <= 0:
                 warnings.append("knowledge character budget exhausted")
                 break
@@ -261,6 +265,98 @@ class KnowledgeGateway:
             catalog_sha256=str(catalog["content_sha256"]),
             items=tuple(items),
             warnings=tuple(dict.fromkeys(warnings)),
+        )
+
+    def retrieve_by_id(
+        self,
+        *,
+        stage: str,
+        knowledge_id: str,
+        actor: str = "",
+    ) -> KnowledgeSelection:
+        """Read one fixed knowledge entry after an exact-ID lookup."""
+
+        if stage not in STAGE_KNOWLEDGE_TYPES:
+            raise ValueError(f"unsupported knowledge stage: {stage}")
+        target_id = str(knowledge_id).strip()
+        if not target_id:
+            raise ValueError("knowledge_id must not be blank")
+        budget = self.budget(stage)
+        catalog = self.client.call_tool(
+            "knowledge_catalog",
+            {"max_chars": min(20000, budget["max_chars"] // 3)},
+        )
+        searched = self.client.call_tool(
+            "knowledge_search",
+            {
+                "query": target_id,
+                "actor": str(actor),
+                "project_id": self.project_id,
+                "knowledge_types": STAGE_KNOWLEDGE_TYPES[stage],
+                "max_results": budget["max_entries"],
+            },
+        )
+        matches = [
+            result
+            for result in searched.get("results", [])
+            if str(result.get("knowledge_id", "")).strip() == target_id
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"fixed knowledge entry {target_id} must resolve to exactly one item"
+            )
+        result = matches[0]
+        read = self.client.call_tool(
+            "knowledge_read",
+            {
+                "path": str(result["path"]),
+                "actor": str(actor),
+                "project_id": self.project_id,
+                "max_chars": budget["max_chars"],
+            },
+        )
+        metadata = read.get("metadata", {})
+        content = str(read.get("content", ""))
+        item = KnowledgeItem(
+            knowledge_id=target_id,
+            title=str(result.get("title", metadata.get("title", ""))),
+            path=str(result["path"]),
+            knowledge_type=str(result.get("type", metadata.get("type", "legacy"))),
+            layer=str(result.get("layer", metadata.get("layer", "legacy"))),
+            scope=str(result.get("scope", metadata.get("scope", "team"))),
+            owner_id=(
+                None
+                if result.get("owner_id", metadata.get("owner_id")) is None
+                else str(result.get("owner_id", metadata.get("owner_id")))
+            ),
+            maturity=str(result.get("maturity", metadata.get("maturity", "legacy"))),
+            conflict_status=str(
+                result.get("conflict_status", metadata.get("conflict_status", "none"))
+            ),
+            revision=int(result.get("revision", metadata.get("revision", 1))),
+            tags=tuple(str(value) for value in result.get("tags", metadata.get("tags", []))),
+            content=content,
+            content_sha256=str(read["content_sha256"]),
+            selection_reason=f"fixed knowledge id: {target_id}",
+            stage=stage,
+            match_score=int(result.get("match_score", 0)),
+            truncated=bool(read.get("truncated", False)),
+        )
+        warnings: list[str] = []
+        if item.constraint_strength == "warning":
+            warnings.append(
+                f"{item.knowledge_id} is advisory only "
+                f"({item.maturity}/{item.conflict_status}/{item.knowledge_type})"
+            )
+        if item.truncated:
+            warnings.append(f"{item.knowledge_id} was truncated by budget")
+        return KnowledgeSelection(
+            stage=stage,
+            query=f"knowledge_id:{target_id}",
+            actor=str(actor),
+            catalog_sha256=str(catalog["content_sha256"]),
+            items=(item,),
+            warnings=tuple(warnings),
         )
 
 

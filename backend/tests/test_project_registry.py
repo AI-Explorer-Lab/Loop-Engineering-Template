@@ -33,6 +33,8 @@ def test_registry_isolates_projects_but_shares_one_executor_per_project(
     registry = ProjectRegistry(_config(first, second))
     try:
         assert registry.default.project_id == "first"
+        assert registry.default.harness is not None
+        assert registry.default.plan_service is not None
         assert registry.get("first").repo_root == first
         assert (
             registry.get("first").task_service.executor

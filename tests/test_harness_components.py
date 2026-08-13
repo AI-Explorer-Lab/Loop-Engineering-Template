@@ -14,6 +14,10 @@ from codex_loop.context import (
     ContextSnapshot,
     merge_context_snapshots,
 )
+from codex_loop.backend_architecture_bootstrap import (
+    BOOTSTRAP_COMPLETED,
+    BackendArchitectureBootstrap,
+)
 from codex_loop.evaluation import (
     ArchitectureEvaluationOutput,
     ArchitectureFinding,
@@ -124,6 +128,69 @@ class FakeMemory:
     def recall(self, **_kwargs: Any) -> list[dict[str, Any]]:
         self.calls += 1
         return [{"task_id": "prior-task", "commit_sha": "c" * 40}]
+
+
+class FixedContextAssembler:
+    def __init__(self, snapshot: ContextSnapshot) -> None:
+        self.snapshot = snapshot
+        self.calls = 0
+
+    def assemble_fixed(self, **_kwargs: Any) -> ContextSnapshot:
+        self.calls += 1
+        path = Path(_kwargs["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.snapshot.to_dict()), encoding="utf-8"
+        )
+        return self.snapshot
+
+
+def test_backend_architecture_bootstrap_reads_fixed_knowledge_once(
+    tmp_path: Path,
+) -> None:
+    item = knowledge_item(
+        knowledge_id="TK-DEC-001", knowledge_type="decision"
+    )
+    snapshot = ContextSnapshot(
+        stage="generation",
+        query="knowledge_id:TK-DEC-001",
+        actor="local-user",
+        knowledge=(item,),
+        catalog_sha256="b" * 64,
+    )
+    snapshot = ContextSnapshot.from_dict(
+        {
+            **snapshot.to_dict(include_hash=False),
+            "snapshot_sha256": hashlib.sha256(
+                json.dumps(
+                    snapshot.to_dict(include_hash=False),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+    )
+    assembler = FixedContextAssembler(snapshot)
+    bootstrap = BackendArchitectureBootstrap(tmp_path, enabled=True)
+
+    first = bootstrap.prepare(
+        task_id="task-1", assembler=assembler, actor="local-user"
+    )
+    second = bootstrap.prepare(
+        task_id="task-1", assembler=assembler, actor="local-user"
+    )
+
+    assert first is not None
+    assert second is not None
+    assert assembler.calls == 1
+    assert bootstrap.snapshot()["status"] == "in_progress"
+
+    bootstrap.mark_delivered("task-1")
+    assert bootstrap.snapshot()["status"] == BOOTSTRAP_COMPLETED
+    assert bootstrap.prepare(
+        task_id="task-2", assembler=assembler, actor="local-user"
+    ) is None
+    assert assembler.calls == 1
 
 
 def test_context_snapshot_is_frozen_and_tamper_evident(tmp_path: Path) -> None:
@@ -286,6 +353,50 @@ def test_planner_only_maps_original_acceptance_ids_and_waits_for_confirmation(
                 "dependencies": ["invented"],
             }
         )
+
+
+def test_planner_generates_acceptance_criteria_when_user_provides_only_requirement(
+    tmp_path: Path,
+) -> None:
+    output = PlannerRoleOutput(
+        execution_mode="single",
+        generated_name="实现最小笔记应用",
+        generated_acceptance_criteria=[
+            "运行 note.py add 后，笔记会保存到 notes.json",
+            "运行 note.py list 能输出已保存笔记",
+        ],
+        subtasks=[
+            PlannedSubtask(
+                sequence=1,
+                title="实现笔记命令行功能",
+                requirement_slice="实现 add 和 list 命令，并为可观察行为补充测试",
+                source_acceptance_ids=["AC-001", "AC-002"],
+            )
+        ],
+    )
+    runner = FakeRoleRunner({"planner": output})
+    service = PlannerService(tmp_path, runner)  # type: ignore[arg-type]
+    context = ContextSnapshot(
+        stage="planner",
+        query="笔记",
+        actor="local-user",
+        snapshot_sha256="f" * 64,
+    )
+
+    draft = service.generate(
+        plan_id="plan-generated-001",
+        name="",
+        requirement="做一个最小的命令行笔记应用",
+        acceptance_criteria=[],
+        context=context,
+    )
+
+    assert draft.acceptance_criteria == {
+        "AC-001": "运行 note.py add 后，笔记会保存到 notes.json",
+        "AC-002": "运行 note.py list 能输出已保存笔记",
+    }
+    assert draft.name == "实现最小笔记应用"
+    assert "generate_from_requirement" in runner.prompts[0]
 
 
 def evaluation_context(item: KnowledgeItem | None) -> ContextSnapshot:
@@ -505,6 +616,29 @@ def test_architecture_finding_requires_one_exact_changed_file_path() -> None:
     instruction = ROLE_INSTRUCTIONS["architecture_evaluator"]
     assert "one path copied verbatim from changed_files" in instruction
     assert "Never combine two file paths" in instruction
+    assert "not_applicable and not_evaluated both require findings to be []" in instruction
+    assert "pass requires every finding.status to be pass" in instruction
+
+
+def test_architecture_status_not_applicable_requires_empty_findings() -> None:
+    with pytest.raises(ValidationError, match="not_applicable architecture output"):
+        ArchitectureEvaluationOutput(
+            status="not_applicable",
+            findings=[
+                {
+                    "finding_id": "ARCH-001",
+                    "status": "not_applicable",
+                    "rationale": "The rule does not apply.",
+                    "changed_location": "src/view.ts:1",
+                    "knowledge": {
+                        "knowledge_id": "knowledge-1",
+                        "revision": 1,
+                        "path": "docs/knowledge/guidelines/knowledge-1.md",
+                    },
+                }
+            ],
+            summary="The rule does not apply.",
+        )
 
 
 @pytest.mark.parametrize(
@@ -767,6 +901,56 @@ class RepairingClient:
         return SimpleNamespace(final_response=value)
 
 
+class ArchitectureRepairingClient:
+    def __init__(self) -> None:
+        self.responses = [
+            json.dumps(
+                {
+                    "status": "not_applicable",
+                    "findings": [
+                        {
+                            "finding_id": "ARCH-001",
+                            "status": "not_applicable",
+                            "rationale": "The supplied rule does not apply.",
+                            "changed_location": "src/view.ts:1",
+                            "knowledge": {
+                                "knowledge_id": "knowledge-1",
+                                "revision": 1,
+                                "path": "docs/knowledge/guidelines/knowledge-1.md",
+                            },
+                        }
+                    ],
+                    "summary": "The supplied rule does not apply.",
+                }
+            ),
+            json.dumps(
+                {
+                    "status": "not_applicable",
+                    "findings": [],
+                    "summary": "The supplied rule does not apply.",
+                }
+            ),
+        ]
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def __enter__(self) -> "ArchitectureRepairingClient":
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        return None
+
+    @staticmethod
+    def start_thread() -> str:
+        return "thread-architecture-repair"
+
+    def run(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
+        self.prompts.append(prompt)
+        value = self.responses[self.calls]
+        self.calls += 1
+        return SimpleNamespace(final_response=value)
+
+
 def test_structured_role_allows_exactly_one_format_repair(tmp_path: Path) -> None:
     client = RepairingClient()
     runner = StructuredRoleRunner(
@@ -786,6 +970,27 @@ def test_structured_role_allows_exactly_one_format_repair(tmp_path: Path) -> Non
     assert "validation_evidence_ids" in client.prompts[1]
     assert (tmp_path / "role" / "result.json").is_file()
     _assert_strict_output_schema(client.schemas[0])
+
+
+def test_architecture_role_repair_enforces_empty_findings_for_not_applicable(
+    tmp_path: Path,
+) -> None:
+    client = ArchitectureRepairingClient()
+    runner = StructuredRoleRunner(
+        tmp_path,
+        client_factory=lambda _path, _role: client,
+    )
+
+    result = runner.run(
+        role="architecture_evaluator",
+        prompt="evaluate",
+        output_model=ArchitectureEvaluationOutput,
+        artifact_dir=tmp_path / "architecture-role",
+    )
+
+    assert result.repaired_format is True
+    assert client.calls == 2
+    assert "not_applicable and not_evaluated require findings=[]" in client.prompts[1]
 
 
 def _assert_strict_output_schema(value: Any) -> None:

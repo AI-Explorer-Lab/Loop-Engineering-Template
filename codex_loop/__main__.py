@@ -22,10 +22,8 @@ from .models import (
 from .git_delivery import GitDeliveryService
 from .harness_runtime import HarnessRuntime
 from .report import ReportBuilder
-from .queue_workflow import QueueWorkflow
 from .review import ReviewError, ReviewService
 from .state import ActiveRunError, QueueStore, StateStore, redact_sensitive_text
-from .workflow import OrchestrationWorkflow
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -121,7 +119,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     project_root = Path(project["repo_root"])
-    validation_profile = project["validation_profile"]
     store = StateStore(project_root)
     queue_store = QueueStore(project_root)
 
@@ -134,30 +131,12 @@ def main(argv: list[str] | None = None) -> int:
                 _print_result(result, store)
                 return 2
             runtime = _configured_harness_runtime(project, args.timeout_seconds)
-            workflow = (
-                runtime.workflow(store=store)
-                if runtime is not None
-                else OrchestrationWorkflow(
-                    project_root,
-                    store=store,
-                    validation_timeout_seconds=args.timeout_seconds,
-                    validation_profile=validation_profile,
-                )
-            )
+            workflow = runtime.workflow(store=store)
             result = workflow.start(task)
         elif args.command == "resume":
             task_id = args.task_id or _find_resumable_task_id(store)
             runtime = _configured_harness_runtime(project, args.timeout_seconds)
-            workflow = (
-                runtime.workflow(store=store)
-                if runtime is not None
-                else OrchestrationWorkflow(
-                    project_root,
-                    store=store,
-                    validation_timeout_seconds=args.timeout_seconds,
-                    validation_profile=validation_profile,
-                )
-            )
+            workflow = runtime.workflow(store=store)
             result = workflow.resume(task_id)
         elif args.command == "review":
             runtime = _configured_harness_runtime(project)
@@ -172,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                     commit_subject=args.commit_subject,
                 )
                 payload: dict[str, Any] = {"review": review.to_dict()}
-                if review.decision is ReviewStatus.APPROVED and runtime is not None:
+                if review.decision is ReviewStatus.APPROVED:
                     payload["commit"] = GitDeliveryService(
                         project_root, store=store
                     ).deliver(args.task_id, review=review)
@@ -181,15 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
-                workflow = (
-                    runtime.queue_workflow()
-                    if runtime is not None
-                    else QueueWorkflow(
-                        project_root,
-                        queue_store=queue_store,
-                        validation_profile=validation_profile,
-                    )
-                )
+                workflow = runtime.queue_workflow()
                 queue_state, review = workflow.record_review(
                     queue_id,
                     args.task_id,
@@ -215,16 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "queue-start":
             values = _queue_values_from_file(args.task_file)
             runtime = _configured_harness_runtime(project, args.timeout_seconds)
-            workflow = (
-                runtime.queue_workflow()
-                if runtime is not None
-                else QueueWorkflow(
-                    project_root,
-                    queue_store=queue_store,
-                    validation_timeout_seconds=args.timeout_seconds,
-                    validation_profile=validation_profile,
-                )
-            )
+            workflow = runtime.queue_workflow()
             queue_state = workflow.start(
                 values["name"],
                 values["subtasks"],
@@ -236,16 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "queue-resume":
             queue_id = args.queue_id or _find_resumable_queue_id(queue_store)
             runtime = _configured_harness_runtime(project, args.timeout_seconds)
-            workflow = (
-                runtime.queue_workflow()
-                if runtime is not None
-                else QueueWorkflow(
-                    project_root,
-                    queue_store=queue_store,
-                    validation_timeout_seconds=args.timeout_seconds,
-                    validation_profile=validation_profile,
-                )
-            )
+            workflow = runtime.queue_workflow()
             queue_state = workflow.resume(queue_id)
             _print_queue(queue_store, queue_id)
             return 0 if queue_state.status is QueueStatus.COMPLETED else 1
@@ -287,14 +240,12 @@ def _configured_project(project_id: str | None = None) -> dict[str, object]:
 def _configured_harness_runtime(
     project: dict[str, object],
     timeout_seconds: float | None = None,
-) -> HarnessRuntime | None:
+) -> HarnessRuntime:
     """Build the same project-scoped Harness runtime used by the local API."""
 
     from backend.config.config import knowledge_from_settings, settings
 
     agent = settings.get("agent", {}) or {}
-    if not bool(agent.get("harness_enabled", False)):
-        return None
     knowledge = knowledge_from_settings(settings)
     return HarnessRuntime(
         Path(project["repo_root"]),
