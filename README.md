@@ -37,7 +37,7 @@ Loop-Engineering-Template/
    ↓
 任务分支单次 commit → 本地归档/中期记忆 → 可选 KB outbox
    ↓
-单任务再次确认 → 核验固定远端与 commit → 推送任务分支（可选）
+单任务再次确认 → 核验固定远端与 commit → 推送任务分支或新项目的 main（可选）
 ```
 
 长任务由人工或 Planner 给出严格顺序。每个子任务机器验证通过并经人工批准后，累计 Diff 才会成为下一 worktree 的 index 基线。
@@ -72,6 +72,7 @@ cp backend/config/app.local.example.yaml \
 - 外部 MCP `registry.json`；
 - 已有被管理项目的绝对路径和知识身份；
 - 可选的固定发布远端（`publish.enabled`、`remote_name`、`remote_url`）；
+- 新项目可配置首次发布目标分支（`publish.branch`，默认 `main`）；
 - 项目自己的验证命令、测试目录和依赖目录。通过前端创建的新项目使用默认 Python `unittest` 验证配置。
 
 验证命令是控制面可信配置，不接受模型动态生成；它们以参数数组保存，通过 `shell=False` 在原有外部沙箱中执行。
@@ -136,7 +137,7 @@ conda run -n loop-engineering python -m codex_loop \
 - `machine_status=infrastructure_error`：隔离、权限、SDK 或本地工具故障。
 - `review_status=pending`：机器流程结束，但尚无人工结论。
 - `delivery_status`：独立记录 commit 与 archive 的可恢复检查点。
-- `publish.status=published`：已将已审核、已 commit、已归档的单任务分支推送到配置的固定远端。
+- `publish.status=published`：已将已审核、已 commit、已归档的单任务结果推送到配置的固定远端；通过前端创建的新项目首次发布默认将任务分支快进到本地 `main`，再推送远端 `main`。
 - 长任务只有当前子任务 `approved` 后才进入下一项。
 
 `active.lock` 只表示进程当前占用执行权。进程异常退出后可以替换过期锁，但必须恢复未完成任务，不能用新任务覆盖。
@@ -151,7 +152,7 @@ conda run -n loop-engineering python -m codex_loop \
 - App Server 的实际权限无法证明不宽于请求范围时，首个 Prompt 前停止。
 - `.codex-orchestrator/` 位于每个被管理项目中，不提交到本仓库。
 - 审核批准只在 `codex/<task-id>` 任务分支创建一次提交；审核接口不会 merge、push、创建 PR 或部署。
-- 发布是独立的显式操作：只允许单任务在审核通过、commit 和归档完成后，核对 worktree、分支、HEAD、工作区和固定远端成功后 push；不会 merge、创建 PR 或部署。
+- 发布是独立的显式操作：只允许单任务在审核通过、commit 和归档完成后，核对 worktree、分支、HEAD、工作区和固定远端成功后 push；新项目首次发布会将本地 `main` 快进到已审核 commit，不创建 PR 或部署。
 
 ## 运行记录
 

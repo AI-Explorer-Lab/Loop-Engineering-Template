@@ -62,6 +62,7 @@ class PlatformService:
             "publish_remote_name": context.publish_remote_name,
             "publish_remote_url": context.publish_remote_url,
             "publish_repository_name": context.publish_repository_name,
+            "publish_branch": context.publish_branch,
         }
 
     def create_project(self, *, name: str, repo_path: str) -> dict[str, Any]:

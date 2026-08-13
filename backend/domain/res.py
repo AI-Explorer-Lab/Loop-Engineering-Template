@@ -35,6 +35,7 @@ class ProjectData(BaseModel):
     publish_remote_name: str = "origin"
     publish_remote_url: str = ""
     publish_repository_name: str = ""
+    publish_branch: str = ""
 
 
 class HistoryItemData(BaseModel):

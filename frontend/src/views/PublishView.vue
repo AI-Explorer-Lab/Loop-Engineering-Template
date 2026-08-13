@@ -20,6 +20,9 @@ const configuredRemote = computed(() =>
 const autoCreateRemote = computed(() =>
   Boolean(store.activeProject.value?.publish_auto_create_remote),
 );
+const publishBranch = computed(() =>
+  String(store.activeProject.value?.publish_branch || (autoCreateRemote.value ? "main" : "—")),
+);
 const publishConfigured = computed(() =>
   Boolean(
     (store.activeProject.value?.publish_enabled && configuredRemote.value)
@@ -58,9 +61,9 @@ const actionMessage = computed(() => {
     return "当前项目未启用 GitHub 发布，请先在项目配置中启用。";
   }
   if (!configuredRemote.value && autoCreateRemote.value) {
-    return `尚未配置固定 GitHub 远端；点击发布后将创建私有仓库“${repositoryName.value}”并自动绑定、推送。`;
+    return `尚未配置固定 GitHub 远端；点击发布后将创建私有仓库“${repositoryName.value}”，并把已审核 commit 发布到 ${publishBranch.value}。`;
   }
-  return `点击后由机器把当前已审核 commit 推送到固定远端；仓库名：${repositoryName.value}。`;
+  return `点击后由机器把当前已审核 commit 推送到固定远端的 ${publishBranch.value} 分支；仓库名：${repositoryName.value}。`;
 });
 
 async function publish(): Promise<void> {
@@ -72,7 +75,7 @@ async function publish(): Promise<void> {
 <template>
   <div class="view-stack">
     <header class="view-header">
-      <div><span class="section-kicker">外部交付</span><h1>发布交付</h1><p>只发布已人工批准、已 commit、已归档的单任务分支。不会创建 PR、合并或部署。</p></div>
+      <div><span class="section-kicker">外部交付</span><h1>发布交付</h1><p>只发布已人工批准、已 commit、已归档的单任务结果。新项目首次发布到 main；不会创建 PR 或部署。</p></div>
       <span class="safety-statement"><i>✓</i> 显式确认</span>
     </header>
 
@@ -87,6 +90,7 @@ async function publish(): Promise<void> {
         <div><span>人工审核</span><strong>{{ store.task.value.review_status }}</strong></div>
         <div><span>本地交付</span><strong>{{ store.task.value.delivery_status }}</strong></div>
         <div><span>任务分支</span><strong>{{ String(store.task.value.workspace.task_branch || '—') }}</strong></div>
+        <div><span>远端分支</span><strong>{{ publishBranch }}</strong></div>
         <div><span>任务类型</span><strong>{{ store.task.value.queue_id ? '队列子任务（不可单独发布）' : '单任务' }}</strong></div>
       </div>
       <div class="delivery-hash"><span>待发布 Commit</span><div><code>{{ commit || '—' }}</code><CopyButton v-if="commit" :value="commit" label="Commit SHA" /></div></div>

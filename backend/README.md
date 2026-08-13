@@ -36,8 +36,9 @@ Knowledge-Base 和 MCP registry。每个项目还需配置自己的验证命令�
 不会静默退回无知识评估。
 
 发布默认关闭。启用时，项目的 `publish` 配置必须同时固定 `remote_name` 和
-`remote_url`；服务会在实际 push 前再次核对任务分支、HEAD、工作区、commit
-证据和仓库远端，不能把发布远端交给任务或模型动态决定。
+`remote_url`；通过前端创建的新项目可以自动创建私有 GitHub 仓库，并默认把首次发布目标设为
+`main`。服务会在实际 push 前再次核对任务分支、HEAD、工作区、commit 证据和仓库远端，不能把
+发布远端或目标分支交给任务或模型动态决定。
 
 ## 接口
 
@@ -96,7 +97,7 @@ API 在单工作线程中执行 Codex，因此 HTTP 请求不会等待开发和�
 
 审查请求包含 `decision`、`reviewer`、`comment`、`reviewed_diff_sha256` 和批准时的单行 `commit_subject`。只允许 `approved`、`changes_requested`、`rejected`；任务未结束、Diff/HEAD/branch/tree 已变化、Diff 含疑似密钥、Git identity 缺失或旧任务时返回冲突。批准只在任务分支创建一个与审查绑定的 commit；审查接口不执行 merge、push、PR、rebase 或 tag。单任务结论不可覆盖；队列子任务的多次返修审查按历史追加保存。
 
-发布请求只接受单任务，并要求 `review_status=approved`、`delivery_status=archived`、已确认的 commit SHA 和发布确认人。发布服务会核对记录中的 task branch、HEAD、工作区和配置的远端 URL，然后只 push 该任务分支；队列子任务不能单独发布，发布失败不会伪造成功记录。
+发布请求只接受单任务，并要求 `review_status=approved`、`delivery_status=archived`、已确认的 commit SHA 和发布确认人。发布服务会核对记录中的 task branch、HEAD、工作区和配置的远端 URL；新项目首次发布会先将本地 `main` 快进到该 commit，再 push 远端 `main`。队列子任务不能单独发布，发布失败不会伪造成功记录。
 
 Plan 草稿只保存输入、冻结 Context、结构化角色输出和验收映射，不创建 worktree。人工确认必须保留原始需求哈希、Context 哈希和全部 `AC-xxx`，一条子任务复用单任务服务，两条以上复用严格串行队列服务。
 

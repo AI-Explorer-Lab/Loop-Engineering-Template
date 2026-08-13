@@ -76,7 +76,7 @@ def provision_git_project(
             + "\n",
             encoding="utf-8",
         )
-        _run_git(path, "init")
+        _run_git(path, "init", "-b", "main")
         _run_git(path, "add", ".gitignore", f"{HARNESS_DIRECTORY}/{HARNESS_CONFIG_FILE}")
         _run_git(
             path,

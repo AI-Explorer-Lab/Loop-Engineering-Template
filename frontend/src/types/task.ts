@@ -218,6 +218,7 @@ export interface ProjectData {
   publish_remote_name?: string;
   publish_remote_url?: string;
   publish_repository_name?: string;
+  publish_branch?: string;
 }
 
 export interface HistoryItemData {

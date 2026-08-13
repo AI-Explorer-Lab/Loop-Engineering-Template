@@ -31,6 +31,7 @@ class GitPublishService:
         auto_create_remote: bool = False,
         repository_name: str = "",
         visibility: str = "private",
+        publish_branch: str = "",
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.remote_name = remote_name.strip()
@@ -39,6 +40,7 @@ class GitPublishService:
         self.auto_create_remote = auto_create_remote
         self.repository_name = repository_name.strip() or self.repo_root.name
         self.visibility = visibility.strip().lower() or "private"
+        self.publish_branch = publish_branch.strip()
         if self.visibility not in {"private", "public", "internal"}:
             raise ValueError("publication visibility must be private, public, or internal")
 
@@ -87,12 +89,27 @@ class GitPublishService:
             ):
                 raise PublishError("task worktree is not clean")
             publication_url = self._resolve_remote(worktree)
-            self._git(worktree, "push", self.remote_name, state.task_branch)
+            target_branch = self._publication_branch(state.task_branch)
+            if target_branch == state.task_branch:
+                self._git(worktree, "push", self.remote_name, state.task_branch)
+            else:
+                self._fast_forward_source_branch(
+                    state,
+                    target_branch=target_branch,
+                    commit_sha=expected_sha,
+                )
+                self._git(
+                    worktree,
+                    "push",
+                    self.remote_name,
+                    f"{state.task_branch}:{target_branch}",
+                )
             result = {
                 "schema_version": 1,
                 "status": "published",
                 "task_id": task_id,
-                "branch": state.task_branch,
+                "branch": target_branch,
+                "source_branch": state.task_branch,
                 "commit_sha": expected_sha,
                 "remote_name": self.remote_name,
                 "remote_url": publication_url,
@@ -104,6 +121,60 @@ class GitPublishService:
             return result
         finally:
             self.store.release_active_lock(lock)
+
+    def _publication_branch(self, task_branch: str) -> str:
+        branch = self.publish_branch or task_branch
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch)
+            or ".." in branch
+            or "@{" in branch
+            or branch.endswith(("/", "."))
+            or "//" in branch
+        ):
+            raise PublishError(f"publication branch is invalid: {branch}")
+        return branch
+
+    def _fast_forward_source_branch(
+        self,
+        state: Any,
+        *,
+        target_branch: str,
+        commit_sha: str,
+    ) -> None:
+        """Advance a newly-created project's checked-out main branch safely."""
+
+        source_root = Path(state.control_repo_root or self.repo_root).resolve()
+        actual_root = Path(
+            self._git(source_root, "rev-parse", "--show-toplevel")
+        ).resolve()
+        if actual_root != source_root:
+            raise PublishError("configured source repository root is invalid")
+        current_branch = self._git(
+            source_root, "rev-parse", "--abbrev-ref", "HEAD"
+        )
+        if current_branch != target_branch:
+            raise PublishError(
+                f"source repository must be checked out on {target_branch} before first publication"
+            )
+        if self._git(
+            source_root,
+            "status",
+            "--porcelain",
+            "--",
+            ".",
+            HARNESS_RUNTIME_PATHSPEC,
+        ):
+            raise PublishError("source repository is not clean")
+        current_commit = self._git(source_root, "rev-parse", "HEAD")
+        if current_commit == commit_sha:
+            return
+        if not state.base_commit or current_commit != state.base_commit:
+            raise PublishError(
+                f"source {target_branch} changed after the task baseline"
+            )
+        self._git(source_root, "merge", "--ff-only", commit_sha)
+        if self._git(source_root, "rev-parse", "HEAD") != commit_sha:
+            raise PublishError(f"source {target_branch} did not reach the published commit")
 
     def _resolve_remote(self, worktree: Path) -> str:
         """Return the exact remote, creating a GitHub repository only when needed."""

@@ -65,6 +65,12 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         "secure_runtime_root": ".codex-runtime",
     }
     assert (target / ".git").is_dir()
+    assert subprocess.run(
+        ["git", "-C", str(target), "branch", "--show-current"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip() == "main"
     tracked = subprocess.run(
         ["git", "-C", str(target), "ls-files", "--cached"],
         capture_output=True,

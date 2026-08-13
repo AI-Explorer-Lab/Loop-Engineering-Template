@@ -38,6 +38,7 @@ class ProjectContext:
     publish_remote_name: str
     publish_remote_url: str
     publish_repository_name: str
+    publish_branch: str
     harness: HarnessRuntime | None
     task_service: TaskService
     queue_service: QueueService
@@ -110,6 +111,7 @@ class ProjectRegistry:
                 "auto_create_remote": True,
                 "remote_name": "origin",
                 "visibility": "private",
+                "branch": "main",
             },
             "validation": default_project_validation(),
         }
@@ -149,6 +151,9 @@ class ProjectRegistry:
         ).strip() or "origin"
         publish_remote_url = str(publish_config.get("remote_url", "")).strip()
         publish_repository_name = root.name
+        publish_branch = str(
+            publish_config.get("branch", "main" if publish_auto_create_remote else "")
+        ).strip()
         validation_profile = item["validation_profile"]
         harness = (
             HarnessRuntime(
@@ -211,6 +216,7 @@ class ProjectRegistry:
             publish_remote_name=publish_remote_name,
             publish_remote_url=publish_remote_url,
             publish_repository_name=publish_repository_name,
+            publish_branch=publish_branch,
             harness=harness,
             task_service=tasks,
             queue_service=queues,
@@ -250,6 +256,9 @@ class ProjectRegistry:
             return None
         remote_name = str(publish_config.get("remote_name", "origin")).strip() or "origin"
         remote_url = str(publish_config.get("remote_url", "")).strip()
+        publish_branch = str(
+            publish_config.get("branch", "main" if auto_create_remote else "")
+        ).strip()
         return GitPublishService(
             root,
             remote_name=remote_name,
@@ -259,4 +268,5 @@ class ProjectRegistry:
                 publish_config.get("repository_name", root.name)
             ).strip(),
             visibility=str(publish_config.get("visibility", "private")),
+            publish_branch=publish_branch,
         )
