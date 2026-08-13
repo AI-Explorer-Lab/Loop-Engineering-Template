@@ -51,8 +51,13 @@ ROLE_INSTRUCTIONS = {
         "knowledge revision and exactly one changed location. changed_location must start "
         "with one path copied verbatim from changed_files and may only add ':' plus a "
         "location inside that same file. Never combine two file paths in one finding; emit "
-        "separate findings instead. Return only schema-valid JSON. Do not edit files or "
-        "invoke tools."
+        "separate findings instead. The top-level status and finding statuses must obey "
+        "these rules: pass requires every finding.status to be pass; fail requires at "
+        "least one finding.status to be fail; needs_human requires at least one "
+        "finding.status to be needs_human; not_applicable and not_evaluated both require "
+        "findings to be []. If no supplied architecture rule applies, return "
+        "{\"status\":\"not_applicable\",\"findings\":[],\"summary\":\"...\"}. "
+        "Return only schema-valid JSON. Do not edit files or invoke tools."
     ),
     "archiver": (
         "You are the archiver role. Summarize the supplied redacted packet and produce at "
@@ -140,10 +145,20 @@ class StructuredRoleRunner:
             except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                 repaired = True
                 validation_detail = sanitize_for_codex(str(exc), max_chars=2000)
+                repair_rules = ""
+                if role == "architecture_evaluator":
+                    repair_rules = (
+                        " For architecture output, enforce these consistency rules: "
+                        "pass requires every finding.status=pass; fail requires at least "
+                        "one finding.status=fail; needs_human requires at least one "
+                        "finding.status=needs_human; not_applicable and not_evaluated "
+                        "require findings=[]."
+                    )
                 repair_prompt = (
                     "Your previous response did not validate. Return the same intended "
                     "result again as one JSON object matching the supplied output schema. "
-                    "Do not add Markdown fences or commentary. Validation error:\n"
+                    "Do not add Markdown fences or commentary."
+                    f"{repair_rules} Validation error:\n"
                     f"{validation_detail}"
                 )
                 second = client.run(repair_prompt, output_schema=schema)

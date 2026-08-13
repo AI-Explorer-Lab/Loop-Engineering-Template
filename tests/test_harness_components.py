@@ -549,6 +549,29 @@ def test_architecture_finding_requires_one_exact_changed_file_path() -> None:
     instruction = ROLE_INSTRUCTIONS["architecture_evaluator"]
     assert "one path copied verbatim from changed_files" in instruction
     assert "Never combine two file paths" in instruction
+    assert "not_applicable and not_evaluated both require findings to be []" in instruction
+    assert "pass requires every finding.status to be pass" in instruction
+
+
+def test_architecture_status_not_applicable_requires_empty_findings() -> None:
+    with pytest.raises(ValidationError, match="not_applicable architecture output"):
+        ArchitectureEvaluationOutput(
+            status="not_applicable",
+            findings=[
+                {
+                    "finding_id": "ARCH-001",
+                    "status": "not_applicable",
+                    "rationale": "The rule does not apply.",
+                    "changed_location": "src/view.ts:1",
+                    "knowledge": {
+                        "knowledge_id": "knowledge-1",
+                        "revision": 1,
+                        "path": "docs/knowledge/guidelines/knowledge-1.md",
+                    },
+                }
+            ],
+            summary="The rule does not apply.",
+        )
 
 
 @pytest.mark.parametrize(
@@ -811,6 +834,56 @@ class RepairingClient:
         return SimpleNamespace(final_response=value)
 
 
+class ArchitectureRepairingClient:
+    def __init__(self) -> None:
+        self.responses = [
+            json.dumps(
+                {
+                    "status": "not_applicable",
+                    "findings": [
+                        {
+                            "finding_id": "ARCH-001",
+                            "status": "not_applicable",
+                            "rationale": "The supplied rule does not apply.",
+                            "changed_location": "src/view.ts:1",
+                            "knowledge": {
+                                "knowledge_id": "knowledge-1",
+                                "revision": 1,
+                                "path": "docs/knowledge/guidelines/knowledge-1.md",
+                            },
+                        }
+                    ],
+                    "summary": "The supplied rule does not apply.",
+                }
+            ),
+            json.dumps(
+                {
+                    "status": "not_applicable",
+                    "findings": [],
+                    "summary": "The supplied rule does not apply.",
+                }
+            ),
+        ]
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def __enter__(self) -> "ArchitectureRepairingClient":
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        return None
+
+    @staticmethod
+    def start_thread() -> str:
+        return "thread-architecture-repair"
+
+    def run(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
+        self.prompts.append(prompt)
+        value = self.responses[self.calls]
+        self.calls += 1
+        return SimpleNamespace(final_response=value)
+
+
 def test_structured_role_allows_exactly_one_format_repair(tmp_path: Path) -> None:
     client = RepairingClient()
     runner = StructuredRoleRunner(
@@ -830,6 +903,27 @@ def test_structured_role_allows_exactly_one_format_repair(tmp_path: Path) -> Non
     assert "validation_evidence_ids" in client.prompts[1]
     assert (tmp_path / "role" / "result.json").is_file()
     _assert_strict_output_schema(client.schemas[0])
+
+
+def test_architecture_role_repair_enforces_empty_findings_for_not_applicable(
+    tmp_path: Path,
+) -> None:
+    client = ArchitectureRepairingClient()
+    runner = StructuredRoleRunner(
+        tmp_path,
+        client_factory=lambda _path, _role: client,
+    )
+
+    result = runner.run(
+        role="architecture_evaluator",
+        prompt="evaluate",
+        output_model=ArchitectureEvaluationOutput,
+        artifact_dir=tmp_path / "architecture-role",
+    )
+
+    assert result.repaired_format is True
+    assert client.calls == 2
+    assert "not_applicable and not_evaluated require findings=[]" in client.prompts[1]
 
 
 def _assert_strict_output_schema(value: Any) -> None:
