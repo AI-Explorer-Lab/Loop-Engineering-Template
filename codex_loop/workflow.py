@@ -9,6 +9,7 @@ import subprocess
 from typing import Any
 
 from .audit import AuditRecorder, file_sha256
+from .backend_architecture_bootstrap import BackendArchitectureBootstrap
 from .codex_client import CodexClient, CodexRunResult
 from .context import (
     ContextAssembler,
@@ -81,6 +82,7 @@ class OrchestrationWorkflow:
         evaluation_coordinator: EvaluationCoordinator | None = None,
         knowledge_actor_id: str = "",
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
+        backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
     ) -> None:
         self.control_repo_root = Path(repo_root).expanduser().resolve()
         self.repo_root = self.control_repo_root  # compatibility alias
@@ -106,6 +108,7 @@ class OrchestrationWorkflow:
         self.context_assembler = context_assembler
         self.evaluation_coordinator = evaluation_coordinator
         self.knowledge_actor_id = str(knowledge_actor_id)
+        self.backend_architecture_bootstrap = backend_architecture_bootstrap
         self.validation_profile = (
             validation_profile
             if isinstance(validation_profile, ValidationProfile)
@@ -462,6 +465,10 @@ class OrchestrationWorkflow:
         prompt_kind = state.pending_prompt_kind
         if prompt_kind is PromptKind.INITIAL:
             prompt = self.prompt_renderer.initial_prompt(task, state)
+            if self.backend_architecture_bootstrap is not None:
+                prompt += self.backend_architecture_bootstrap.initial_prompt_block(
+                    task.task_id
+                )
         elif prompt_kind is PromptKind.REPAIR:
             if not state.rounds or state.cycle_failure_count not in {1, 2}:
                 raise InfrastructureError(
@@ -1138,13 +1145,52 @@ class OrchestrationWorkflow:
         if self.context_assembler is None:
             return None
         self._bind_context_events(audit)
-        return self.context_assembler.assemble(
-            path=self.store.run_dir(task.task_id) / "context" / "generation.json",
+        context_root = self.store.run_dir(task.task_id) / "context"
+        generation_path = context_root / "generation.json"
+        query = " ".join([task.requirement, *task.acceptance_criteria])
+        excluded = set()
+        if self.backend_architecture_bootstrap is not None:
+            excluded.add(self.backend_architecture_bootstrap.knowledge_id)
+        if generation_path.is_file():
+            return self.context_assembler.assemble(
+                path=generation_path,
+                stage="generation",
+                query=query,
+                actor=self.knowledge_actor_id,
+                include_memory=True,
+                exclude_knowledge_ids=excluded,
+            )
+
+        bootstrap_context = None
+        if self.backend_architecture_bootstrap is not None:
+            bootstrap_context = self.backend_architecture_bootstrap.prepare(
+                task_id=task.task_id,
+                assembler=self.context_assembler,
+                actor=self.knowledge_actor_id,
+                event_sink=audit.append,
+            )
+        generation = self.context_assembler.assemble(
+            path=context_root / "generation-base.json",
             stage="generation",
-            query=" ".join([task.requirement, *task.acceptance_criteria]),
+            query=query,
             actor=self.knowledge_actor_id,
             include_memory=True,
+            exclude_knowledge_ids=excluded,
         )
+        if bootstrap_context is None:
+            _atomic_write_json(generation_path, generation.to_dict())
+            return generation
+        merged = merge_context_snapshots("generation", bootstrap_context, generation)
+        _atomic_write_json(generation_path, merged.to_dict())
+        audit.append(
+            "backend_architecture.context_bound",
+            {
+                "knowledge_id": self.backend_architecture_bootstrap.knowledge_id,
+                "snapshot_sha256": bootstrap_context.snapshot_sha256,
+                "generation_context_sha256": merged.snapshot_sha256,
+            },
+        )
+        return merged
 
     def _assemble_evaluation_context(
         self,
@@ -1158,12 +1204,24 @@ class OrchestrationWorkflow:
         context_root = self.store.run_dir(task.task_id) / "context"
         changed_paths = audit.changed_paths()
         query = " ".join([task.requirement, *task.acceptance_criteria])
+        excluded = set()
+        bootstrap_context = None
+        if self.backend_architecture_bootstrap is not None:
+            excluded.add(self.backend_architecture_bootstrap.knowledge_id)
+            if not (context_root / "evaluation.json").is_file():
+                bootstrap_context = self.backend_architecture_bootstrap.prepare(
+                    task_id=task.task_id,
+                    assembler=self.context_assembler,
+                    actor=self.knowledge_actor_id,
+                    event_sink=audit.append,
+                )
         specification = self.context_assembler.assemble(
             path=context_root / "spec_evaluation.json",
             stage="spec_evaluation",
             query=query,
             actor=self.knowledge_actor_id,
             changed_paths=changed_paths,
+            exclude_knowledge_ids=excluded,
         )
         architecture = self.context_assembler.assemble(
             path=context_root / "architecture_evaluation.json",
@@ -1171,6 +1229,7 @@ class OrchestrationWorkflow:
             query=query,
             actor=self.knowledge_actor_id,
             changed_paths=changed_paths,
+            exclude_knowledge_ids=excluded,
         )
         target = context_root / "evaluation.json"
         if target.is_file():
@@ -1179,7 +1238,10 @@ class OrchestrationWorkflow:
             )
             merged.verify_hash()
             return merged
-        merged = merge_context_snapshots("evaluation", specification, architecture)
+        snapshots = [specification, architecture]
+        if bootstrap_context is not None:
+            snapshots.insert(0, bootstrap_context)
+        merged = merge_context_snapshots("evaluation", *snapshots)
         _atomic_write_json(target, merged.to_dict())
         audit.append(
             "context.assembled",

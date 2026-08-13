@@ -535,7 +535,7 @@ describe("App workbench", () => {
     platformApi.getCapabilities.mockResolvedValue({
       status: "unavailable",
       project_id: "default",
-      reason: "harness feature is disabled",
+      reason: "MCP capability unavailable",
     });
     platformApi.getMetrics.mockRejectedValue(new Error("metrics unavailable"));
     const committed = task("success", {
@@ -565,7 +565,7 @@ describe("App workbench", () => {
     await wrapper.get('[data-test="confirm-review"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-test="review-panel"]').text()).toContain(
-      "Archiver 未启用，Commit 为交付终态",
+      "Archiver 状态不可用，Commit 为交付终态",
     );
 
     await vi.advanceTimersByTimeAsync(2_000);

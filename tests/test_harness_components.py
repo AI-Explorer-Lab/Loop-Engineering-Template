@@ -14,6 +14,10 @@ from codex_loop.context import (
     ContextSnapshot,
     merge_context_snapshots,
 )
+from codex_loop.backend_architecture_bootstrap import (
+    BOOTSTRAP_COMPLETED,
+    BackendArchitectureBootstrap,
+)
 from codex_loop.evaluation import (
     ArchitectureEvaluationOutput,
     ArchitectureFinding,
@@ -124,6 +128,69 @@ class FakeMemory:
     def recall(self, **_kwargs: Any) -> list[dict[str, Any]]:
         self.calls += 1
         return [{"task_id": "prior-task", "commit_sha": "c" * 40}]
+
+
+class FixedContextAssembler:
+    def __init__(self, snapshot: ContextSnapshot) -> None:
+        self.snapshot = snapshot
+        self.calls = 0
+
+    def assemble_fixed(self, **_kwargs: Any) -> ContextSnapshot:
+        self.calls += 1
+        path = Path(_kwargs["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.snapshot.to_dict()), encoding="utf-8"
+        )
+        return self.snapshot
+
+
+def test_backend_architecture_bootstrap_reads_fixed_knowledge_once(
+    tmp_path: Path,
+) -> None:
+    item = knowledge_item(
+        knowledge_id="TK-DEC-001", knowledge_type="decision"
+    )
+    snapshot = ContextSnapshot(
+        stage="generation",
+        query="knowledge_id:TK-DEC-001",
+        actor="local-user",
+        knowledge=(item,),
+        catalog_sha256="b" * 64,
+    )
+    snapshot = ContextSnapshot.from_dict(
+        {
+            **snapshot.to_dict(include_hash=False),
+            "snapshot_sha256": hashlib.sha256(
+                json.dumps(
+                    snapshot.to_dict(include_hash=False),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+    )
+    assembler = FixedContextAssembler(snapshot)
+    bootstrap = BackendArchitectureBootstrap(tmp_path, enabled=True)
+
+    first = bootstrap.prepare(
+        task_id="task-1", assembler=assembler, actor="local-user"
+    )
+    second = bootstrap.prepare(
+        task_id="task-1", assembler=assembler, actor="local-user"
+    )
+
+    assert first is not None
+    assert second is not None
+    assert assembler.calls == 1
+    assert bootstrap.snapshot()["status"] == "in_progress"
+
+    bootstrap.mark_delivered("task-1")
+    assert bootstrap.snapshot()["status"] == BOOTSTRAP_COMPLETED
+    assert bootstrap.prepare(
+        task_id="task-2", assembler=assembler, actor="local-user"
+    ) is None
+    assert assembler.calls == 1
 
 
 def test_context_snapshot_is_frozen_and_tamper_evident(tmp_path: Path) -> None:

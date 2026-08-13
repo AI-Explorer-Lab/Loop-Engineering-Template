@@ -36,6 +36,10 @@ class ProjectData(BaseModel):
     publish_remote_url: str = ""
     publish_repository_name: str = ""
     publish_branch: str = ""
+    backend_architecture_enabled: bool = False
+    backend_architecture_knowledge_id: str = "TK-DEC-001"
+    backend_architecture_status: str = "disabled"
+    backend_architecture_snapshot_sha256: str = ""
 
 
 class HistoryItemData(BaseModel):

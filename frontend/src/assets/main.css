@@ -464,6 +464,11 @@ code, pre { font-family: var(--mono); }
 .project-create-form { max-width: 760px; padding: 24px 26px 26px; }
 .project-create-form .task-form { grid-template-columns: 1fr 1fr; }
 .project-create-form .task-form > .field-hint, .project-create-form .task-form > .form-error, .project-create-form .button-row { grid-column: 1 / -1; }
+.project-architecture-toggle { grid-column: 1 / -1; display: flex !important; grid-template-columns: auto 1fr; align-items: start; gap: 10px; padding: 12px; border: 1px solid #e4e8ef; border-radius: 8px; background: #fafbfc; }
+.project-architecture-toggle input { width: 16px; height: 16px; margin-top: 2px; }
+.project-architecture-toggle span { display: grid; gap: 3px; }
+.project-architecture-toggle small { color: #8993a1; font-size: 0.68rem; font-weight: 500; line-height: 1.45; }
+.project-architecture-state { margin-top: 12px; color: #52647b; font-size: 0.7rem; }
 .button-row { display: flex; justify-content: flex-end; gap: 9px; }
 .project-card { display: grid; min-height: 260px; align-content: start; }
 .project-card.selected { border-color: #a9c1f2; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.05), var(--shadow); }

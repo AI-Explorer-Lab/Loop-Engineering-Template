@@ -121,6 +121,7 @@ class ContextAssembler:
         memory_tags: list[str] | None = None,
         technologies: list[str] | None = None,
         include_memory: bool = False,
+        exclude_knowledge_ids: set[str] | None = None,
     ) -> ContextSnapshot:
         target = Path(path)
         if target.is_file():
@@ -136,6 +137,7 @@ class ContextAssembler:
             query=query,
             actor=actor,
             changed_paths=changed_paths,
+            exclude_knowledge_ids=exclude_knowledge_ids,
         )
         selected_skills, skill_warnings = self.skills.select(
             stage=stage,
@@ -176,6 +178,55 @@ class ContextAssembler:
                     "skill_count": len(snapshot.skills),
                     "memory_count": len(snapshot.medium_term_memory),
                     "warning_count": len(snapshot.warnings),
+                },
+            )
+        return snapshot
+
+    def assemble_fixed(
+        self,
+        *,
+        path: str | Path,
+        stage: str,
+        knowledge_id: str,
+        actor: str,
+    ) -> ContextSnapshot:
+        """Assemble one fixed knowledge entry without selecting generic skills."""
+
+        target = Path(path)
+        if target.is_file():
+            snapshot = ContextSnapshot.from_dict(
+                json.loads(target.read_text(encoding="utf-8"))
+            )
+            if snapshot.stage != stage:
+                raise InfrastructureError("fixed context stage does not match request")
+            snapshot.verify_hash()
+            return snapshot
+        selection = self.knowledge.retrieve_by_id(
+            stage=stage,
+            knowledge_id=knowledge_id,
+            actor=actor,
+        )
+        snapshot = ContextSnapshot(
+            stage=stage,
+            query=selection.query,
+            actor=actor,
+            knowledge=selection.items,
+            warnings=selection.warnings,
+            budget=self.knowledge.budget(stage),
+            catalog_sha256=selection.catalog_sha256,
+        )
+        snapshot = ContextSnapshot.from_dict(
+            {**snapshot.to_dict(include_hash=False), "snapshot_sha256": _snapshot_hash(snapshot)}
+        )
+        _atomic_write_json(target, snapshot.to_dict())
+        if self.event_sink is not None:
+            self.event_sink(
+                "context.fixed_assembled",
+                {
+                    "stage": stage,
+                    "knowledge_id": knowledge_id,
+                    "path": target.name,
+                    "snapshot_sha256": snapshot.snapshot_sha256,
                 },
             )
         return snapshot

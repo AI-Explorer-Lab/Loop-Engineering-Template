@@ -36,6 +36,7 @@ from .validation_profile import ValidationProfile
 WorkflowFactory = Callable[[StateStore, str, Path | None, str], Any]
 DeliveryFactory = Callable[[StateStore], GitDeliveryService]
 ArchiveCallback = Callable[..., Any]
+BootstrapCallback = Callable[[str], None]
 
 
 class QueueWorkflow:
@@ -51,6 +52,8 @@ class QueueWorkflow:
         delivery_factory: DeliveryFactory | None = None,
         archive_callback: ArchiveCallback | None = None,
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
+        bootstrap_complete_callback: BootstrapCallback | None = None,
+        bootstrap_failed_callback: BootstrapCallback | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.queue_store = queue_store or QueueStore(self.repo_root)
@@ -65,6 +68,8 @@ class QueueWorkflow:
             lambda store: GitDeliveryService(self.repo_root, store=store)
         )
         self.archive_callback = archive_callback
+        self.bootstrap_complete_callback = bootstrap_complete_callback
+        self.bootstrap_failed_callback = bootstrap_failed_callback
 
     def prepare(
         self,
@@ -353,6 +358,8 @@ class QueueWorkflow:
             child.status = QueueTaskStatus.REJECTED
             state.status = QueueStatus.REJECTED
             state.finished_at = utc_now_iso()
+            if self.bootstrap_failed_callback is not None:
+                self.bootstrap_failed_callback(task_id)
             event_type = "subtask.rejected"
 
         self.queue_store.save_state(state)
@@ -509,6 +516,8 @@ class QueueWorkflow:
         child = state.task(task_id)
         child.delivery_status = store.load_state(task_id).delivery_status
         self._promote_cumulative_diff(queue_id, task_id, state)
+        if self.bootstrap_complete_callback is not None:
+            self.bootstrap_complete_callback(task_id)
         self._archive_after_commit(task_id, store)
         child.delivery_status = store.load_state(task_id).delivery_status
 

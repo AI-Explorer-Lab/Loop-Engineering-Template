@@ -28,6 +28,7 @@ from ..utils.task_executor import TaskExecutor
 WorkflowFactory = Callable[[], OrchestrationWorkflow]
 QueueWorkflowFactory = Callable[[], QueueWorkflow]
 ArchiveCallback = Callable[[str, Any], dict[str, Any]]
+BootstrapCallback = Callable[[str], None]
 
 
 class TaskService:
@@ -47,6 +48,8 @@ class TaskService:
         archive_callback: ArchiveCallback | None = None,
         archive_retry_callback: ArchiveCallback | None = None,
         publish_service: GitPublishService | None = None,
+        bootstrap_complete_callback: BootstrapCallback | None = None,
+        bootstrap_failed_callback: BootstrapCallback | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.executor = executor or TaskExecutor()
@@ -62,6 +65,8 @@ class TaskService:
         self.archive_callback = archive_callback
         self.archive_retry_callback = archive_retry_callback
         self.publish_service = publish_service
+        self.bootstrap_complete_callback = bootstrap_complete_callback
+        self.bootstrap_failed_callback = bootstrap_failed_callback
         self.queue_store = QueueStore(self.repo_root)
         self.queue_workflow_factory = queue_workflow_factory or (
             lambda: QueueWorkflow(
@@ -312,7 +317,12 @@ class TaskService:
                 )
                 if review.decision.value == "approved":
                     self.delivery_service.deliver(task_id, review=review)
+                    if self.bootstrap_complete_callback is not None:
+                        self.bootstrap_complete_callback(task_id)
                     self._schedule_archive_after_commit(task_id, mapper.store)
+                elif review.decision.value == "rejected":
+                    if self.bootstrap_failed_callback is not None:
+                        self.bootstrap_failed_callback(task_id)
             else:
                 workflow = self.queue_workflow_factory()
                 queue_state, _ = workflow.record_review(

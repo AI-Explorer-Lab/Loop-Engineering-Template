@@ -86,3 +86,42 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         assert restarted.get("read-notes").publish_auto_create_remote is True
     finally:
         restarted.close(wait=True)
+
+
+def test_new_project_persists_one_time_backend_architecture_configuration(
+    tmp_path: Path,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    target = tmp_path / "daily-journal"
+    registry_path = tmp_path / "projects.json"
+    mcp_registry = tmp_path / "mcp-registry.json"
+    mcp_registry.write_text(json.dumps({"roots": {}}), encoding="utf-8")
+    config = _config(control_root, registry_path)
+    config["agent"] = {
+        **config["agent"],
+        "knowledge": {
+            "repo_root": str(tmp_path),
+            "mcp_registry": str(mcp_registry),
+            "knowledge_writer_actor_id": "orchestrator",
+        },
+    }
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "Daily Journal",
+                "repo_path": str(target),
+                "backend_architecture_enabled": True,
+            },
+        )
+
+    assert response.status_code == 201
+    created = response.json()["data"]
+    assert created["backend_architecture_enabled"] is True
+    assert created["backend_architecture_knowledge_id"] == "TK-DEC-001"
+    assert created["backend_architecture_status"] == "pending"
+    stored = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert stored[0]["backend_architecture_enabled"] is True
+    assert stored[0]["backend_architecture_knowledge_id"] == "TK-DEC-001"

@@ -9,6 +9,7 @@ const router = useRouter();
 const showCreateForm = ref(false);
 const projectName = ref("");
 const projectPath = ref("");
+const backendArchitectureEnabled = ref(false);
 const formError = ref("");
 const creating = ref(false);
 
@@ -26,7 +27,11 @@ async function create(): Promise<void> {
   }
   formError.value = "";
   creating.value = true;
-  const created = await store.createProject({ name, repo_path: repoPath });
+  const created = await store.createProject({
+    name,
+    repo_path: repoPath,
+    backend_architecture_enabled: backendArchitectureEnabled.value,
+  });
   creating.value = false;
   if (!created) {
     formError.value = store.pageError.value || "项目创建失败。";
@@ -34,6 +39,7 @@ async function create(): Promise<void> {
   }
   projectName.value = "";
   projectPath.value = "";
+  backendArchitectureEnabled.value = false;
   showCreateForm.value = false;
   await router.push("/create");
 }
@@ -50,6 +56,10 @@ async function create(): Promise<void> {
       <form class="task-form" @submit.prevent="create">
         <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：read-notes" /></label>
         <label>目标路径<input v-model="projectPath" data-test="project-path" :disabled="creating" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
+        <label class="project-architecture-toggle">
+          <input v-model="backendArchitectureEnabled" data-test="backend-architecture-enabled" type="checkbox" :disabled="creating" />
+          <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次。</small></span>
+        </label>
         <p class="field-hint">后端只接受绝对路径；目标路径必须是尚不存在的新目录。</p>
         <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
         <div class="button-row"><button class="secondary-button" type="button" :disabled="creating" @click="showCreateForm = false">取消</button><button class="primary-button" type="submit" :disabled="creating">{{ creating ? "正在创建…" : "创建并进入项目" }}</button></div>
@@ -59,6 +69,9 @@ async function create(): Promise<void> {
       <article v-for="project in store.projects.value" :key="project.project_id" class="surface project-card" :class="{ selected: project.project_id === store.activeProjectId.value }">
         <div class="project-card-top"><span class="project-glyph">{{ project.name.slice(0, 1).toUpperCase() }}</span><span v-if="project.is_default" class="default-chip">默认</span></div>
         <h2>{{ project.name }}</h2><code>{{ project.repo_root }}</code>
+        <div v-if="project.backend_architecture_enabled" class="project-architecture-state">
+          后端架构：{{ project.backend_architecture_status === "completed" ? "已完成" : project.backend_architecture_status === "in_progress" ? "初始化中" : project.backend_architecture_status === "failed" ? "初始化失败" : "待首次开发" }}
+        </div>
         <div class="project-runtime"><i :class="{ active: project.active_identifier }" /><span>{{ project.active_identifier ? `运行中 · ${project.active_identifier}` : "当前空闲" }}</span></div>
         <button v-if="project.project_id !== store.activeProjectId.value" class="secondary-button" type="button" @click="select(project.project_id)">切换到此项目</button>
         <span v-else class="selected-project-label">✓ 当前项目</span>

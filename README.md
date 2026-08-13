@@ -57,7 +57,7 @@ npm ci --prefix frontend
 
 ## 本地配置
 
-默认配置可以直接启动并管理本仓库，增强 Harness 默认关闭。需要连接外部项目、Knowledge-Base 或 MCP 时：
+Harness 是 Loop-Engineering 的固定运行前提。启动前必须在本地配置外部 Knowledge-Base 和 MCP 路径：
 
 ```bash
 cp backend/config/app.local.example.yaml \
@@ -74,10 +74,11 @@ cp backend/config/app.local.example.yaml \
 - 可选的固定发布远端（`publish.enabled`、`remote_name`、`remote_url`）；
 - 新项目可配置首次发布目标分支（`publish.branch`，默认 `main`）；
 - 项目自己的验证命令、测试目录和依赖目录。通过前端创建的新项目使用默认 Python `unittest` 验证配置。
+- 项目级 `backend_architecture_enabled`：启用后，首次开发任务固定读取 MCP 知识 `TK-DEC-001`，完成一次后状态冻结为 `completed`，后续任务不再自动读取该架构知识。
 
 验证命令是控制面可信配置，不接受模型动态生成；它们以参数数组保存，通过 `shell=False` 在原有外部沙箱中执行。
 
-`agent.harness_enabled=true` 时，必须配置外部 Knowledge-Base 和 MCP registry。两者不随本仓库分发，路径不存在时服务会明确拒绝启动。MCP 使用本机 `stdio`，read/archive 模式严格分离并禁用网络；Generator 只接收冻结后的来源与哈希，不直接调用 MCP。
+外部 Knowledge-Base 和 MCP registry 不随本仓库分发，路径不存在时服务会明确拒绝启动。MCP 使用本机 `stdio`，read/archive 模式严格分离并禁用网络；Generator 只接收冻结后的来源与哈希，不直接调用 MCP。系统不存在无 Harness 的降级运行模式。
 
 ## GitHub 认证
 

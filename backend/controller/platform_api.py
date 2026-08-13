@@ -55,6 +55,7 @@ async def create_project(
             _service(request).create_project,
             name=payload.name,
             repo_path=payload.repo_path,
+            backend_architecture_enabled=payload.backend_architecture_enabled,
         )
     )
 

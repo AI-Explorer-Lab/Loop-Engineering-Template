@@ -8,6 +8,7 @@ from backend.config.config import (
     REPO_ROOT,
     knowledge_from_settings,
     projects_from_settings,
+    validate_settings,
 )
 
 
@@ -26,6 +27,29 @@ def test_external_paths_are_resolved_from_the_standalone_repository() -> None:
 
     assert knowledge["repo_root"] == (REPO_ROOT / "../Knowledge-Base").resolve()
     assert knowledge["mcp_registry"] == (REPO_ROOT / "../mcp/registry.json").resolve()
+
+
+def test_harness_configuration_is_required_without_an_enable_switch(
+    tmp_path: Path,
+) -> None:
+    config = {
+        "server": {"port": 8100, "cors_origins": ["http://localhost"]},
+        "agent": {
+            "validation_timeout_seconds": 30,
+            "max_parallel_projects": 1,
+            "projects": [
+                {
+                    "id": "sample",
+                    "repo_root": str(tmp_path),
+                    "default": True,
+                    "knowledge_actor_id": "local-user",
+                }
+            ],
+        },
+    }
+
+    with pytest.raises(RuntimeError, match=r"agent\.knowledge\.repo_root"):
+        validate_settings(config)
 
 
 def test_project_registry_parses_a_project_specific_validation_profile() -> None:

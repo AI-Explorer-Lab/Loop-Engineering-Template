@@ -219,6 +219,10 @@ export interface ProjectData {
   publish_remote_url?: string;
   publish_repository_name?: string;
   publish_branch?: string;
+  backend_architecture_enabled?: boolean;
+  backend_architecture_knowledge_id?: string;
+  backend_architecture_status?: string;
+  backend_architecture_snapshot_sha256?: string;
 }
 
 export interface HistoryItemData {

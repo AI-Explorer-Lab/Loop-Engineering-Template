@@ -8,8 +8,10 @@ from threading import BoundedSemaphore
 from typing import Any
 
 from codex_loop.harness_runtime import HarnessRuntime
-from codex_loop.queue_workflow import QueueWorkflow
-from codex_loop.workflow import OrchestrationWorkflow
+from codex_loop.backend_architecture_bootstrap import (
+    BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
+    BackendArchitectureBootstrap,
+)
 from codex_loop.git_publish import GitPublishService
 from codex_loop.validation_profile import ValidationProfile
 
@@ -39,10 +41,13 @@ class ProjectContext:
     publish_remote_url: str
     publish_repository_name: str
     publish_branch: str
-    harness: HarnessRuntime | None
+    backend_architecture_enabled: bool
+    backend_architecture_knowledge_id: str
+    backend_architecture_bootstrap: BackendArchitectureBootstrap
+    harness: HarnessRuntime
     task_service: TaskService
     queue_service: QueueService
-    plan_service: PlanService | None
+    plan_service: PlanService
 
 
 class ProjectRegistry:
@@ -52,10 +57,8 @@ class ProjectRegistry:
         self._config = config
         agent = config.get("agent", {}) or {}
         timeout = float(agent.get("validation_timeout_seconds", 900))
-        harness_enabled = bool(agent.get("harness_enabled", False))
         knowledge = knowledge_from_settings(config)
         self._timeout = timeout
-        self._harness_enabled = harness_enabled
         self._knowledge = knowledge
         self._gate = BoundedSemaphore(int(agent.get("max_parallel_projects", 1)))
         self._contexts: dict[str, ProjectContext] = {}
@@ -83,7 +86,13 @@ class ProjectRegistry:
             key=lambda item: (not item.is_default, item.name.casefold()),
         )
 
-    def create_project(self, *, name: str, repo_path: str) -> ProjectContext:
+    def create_project(
+        self,
+        *,
+        name: str,
+        repo_path: str,
+        backend_architecture_enabled: bool = False,
+    ) -> ProjectContext:
         """Provision, register, and make available one new project immediately."""
 
         normalized_name = str(name).strip()
@@ -107,6 +116,8 @@ class ProjectRegistry:
             "default": False,
             "is_default": False,
             "knowledge_actor_id": "local-user",
+            "backend_architecture_enabled": bool(backend_architecture_enabled),
+            "backend_architecture_knowledge_id": BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             "publish": {
                 "auto_create_remote": True,
                 "remote_name": "origin",
@@ -155,48 +166,45 @@ class ProjectRegistry:
             publish_config.get("branch", "main" if publish_auto_create_remote else "")
         ).strip()
         validation_profile = item["validation_profile"]
-        harness = (
-            HarnessRuntime(
-                root,
-                project_id=project_id,
-                knowledge_actor_id=str(item.get("knowledge_actor_id", "")),
-                knowledge_writer_actor_id=str(
-                    self._knowledge.get("knowledge_writer_actor_id", "")
-                ),
-                mcp_registry=str(self._knowledge.get("mcp_registry", "")),
-                validation_timeout_seconds=self._timeout,
-                validation_profile=validation_profile,
-            )
-            if self._harness_enabled
-            else None
+        backend_architecture_enabled = bool(
+            item.get("backend_architecture_enabled", False)
         )
-        workflow_factory = (
-            harness.workflow
-            if harness is not None
-            else lambda root=root, profile=validation_profile: OrchestrationWorkflow(
-                root,
-                validation_timeout_seconds=self._timeout,
-                validation_profile=profile,
+        backend_architecture_knowledge_id = str(
+            item.get(
+                "backend_architecture_knowledge_id",
+                BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             )
+        ).strip() or BACKEND_ARCHITECTURE_KNOWLEDGE_ID
+        backend_architecture_bootstrap = BackendArchitectureBootstrap(
+            root,
+            enabled=backend_architecture_enabled,
+            knowledge_id=backend_architecture_knowledge_id,
         )
-        queue_workflow_factory = (
-            harness.queue_workflow
-            if harness is not None
-            else lambda root=root, profile=validation_profile: QueueWorkflow(
-                root,
-                validation_timeout_seconds=self._timeout,
-                validation_profile=profile,
-            )
+        harness = HarnessRuntime(
+            root,
+            project_id=project_id,
+            knowledge_actor_id=str(item.get("knowledge_actor_id", "")),
+            knowledge_writer_actor_id=str(
+                self._knowledge.get("knowledge_writer_actor_id", "")
+            ),
+            mcp_registry=str(self._knowledge.get("mcp_registry", "")),
+            validation_timeout_seconds=self._timeout,
+            validation_profile=validation_profile,
+            backend_architecture_bootstrap=backend_architecture_bootstrap,
         )
+        workflow_factory = harness.workflow
+        queue_workflow_factory = harness.queue_workflow
         tasks = TaskService(
             root,
             validation_timeout_seconds=self._timeout,
             executor=executor,
             workflow_factory=workflow_factory,
             queue_workflow_factory=queue_workflow_factory,
-            archive_callback=(None if harness is None else harness.archive),
-            archive_retry_callback=(None if harness is None else harness.retry_archive),
+            archive_callback=harness.archive,
+            archive_retry_callback=harness.retry_archive,
             publish_service=self._publish_service(root, item),
+            bootstrap_complete_callback=backend_architecture_bootstrap.mark_delivered,
+            bootstrap_failed_callback=backend_architecture_bootstrap.mark_failed,
         )
         queues = QueueService(
             root,
@@ -204,7 +212,7 @@ class ProjectRegistry:
             executor=executor,
             workflow_factory=queue_workflow_factory,
         )
-        plans = None if harness is None else PlanService(harness, tasks, queues)
+        plans = PlanService(harness, tasks, queues)
         return ProjectContext(
             project_id=project_id,
             name=str(item["name"]),
@@ -217,6 +225,9 @@ class ProjectRegistry:
             publish_remote_url=publish_remote_url,
             publish_repository_name=publish_repository_name,
             publish_branch=publish_branch,
+            backend_architecture_enabled=backend_architecture_enabled,
+            backend_architecture_knowledge_id=backend_architecture_knowledge_id,
+            backend_architecture_bootstrap=backend_architecture_bootstrap,
             harness=harness,
             task_service=tasks,
             queue_service=queues,

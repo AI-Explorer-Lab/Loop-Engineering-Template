@@ -29,11 +29,10 @@ conda run -n loop-engineering uvicorn backend.main:app \
 默认配置位于 `backend/config/app.yaml`，机器专属覆盖写入忽略提交的
 `backend/config/app.local.yaml`；示例见 `backend/config/app.local.example.yaml`。
 
-`agent.harness_enabled=true` 时，每个 `agent.projects[]` 必须配置
-`knowledge_actor_id`，全局 `agent.knowledge` 必须指向使用者自行准备的
+每个 `agent.projects[]` 必须配置 `knowledge_actor_id`，全局 `agent.knowledge` 必须指向使用者自行准备的
 Knowledge-Base 和 MCP registry。每个项目还需配置自己的验证命令和依赖目录。
 这些身份只用于知识访问与审计，不是登录账号。能力不可用时服务启动失败关闭，
-不会静默退回无知识评估。
+不会静默退回无 Harness 或无知识评估模式。Harness 始终启用。
 
 发布默认关闭。启用时，项目的 `publish` 配置必须同时固定 `remote_name` 和
 `remote_url`；通过前端创建的新项目可以自动创建私有 GitHub 仓库，并默认把首次发布目标设为
@@ -91,7 +90,7 @@ curl -X POST http://127.0.0.1:8100/api/tasks \
 
 API 在单工作线程中执行 Codex，因此 HTTP 请求不会等待开发和测试结束。同一时间只能有一个活动任务；已有未完成任务时，先使用恢复接口，不要创建新任务。
 
-新项目通过项目页的“新建项目”创建，提交项目名称和绝对目标路径即可。后端只接受尚不存在的新目录，会创建目录、初始化 Git、提交可追踪的 `.harness/project.json` 和安全边界用的 `.gitignore`，并写入默认 Python `unittest` 验证配置。认证信息与临时运行状态留在本地隔离目录。项目注册保存在控制面 `.codex-orchestrator/projects.json`，不再要求为每个新项目手动编辑 `app.local.yaml`。
+新项目通过项目页的“新建项目”创建，提交项目名称、绝对目标路径和可选的 `backend_architecture_enabled` 即可。后端只接受尚不存在的新目录，会创建目录、初始化 Git、提交可追踪的 `.harness/project.json` 和安全边界用的 `.gitignore`，并写入默认 Python `unittest` 验证配置。启用后端架构时，首次开发任务固定读取 MCP 知识 `TK-DEC-001`，先完成后端架构 Bootstrap 再实现业务需求；Bootstrap 在审查绑定的 Commit 成功后才标记为 `completed`，后续任务不会重复读取。认证信息与临时运行状态留在本地隔离目录。项目注册保存在控制面 `.codex-orchestrator/projects.json`，不再要求为每个新项目手动编辑 `app.local.yaml`。
 
 创建长任务时，`subtasks` 数组顺序就是唯一执行顺序，不接收依赖字段。每项分别包含 `requirement` 和至少一条 `acceptance_criteria`。当前子任务机器流程结束后，仍使用 `/api/tasks/{task_id}`、`report`、`diff` 和 `review` 查看及审查；批准后后台单工作线程才会执行下一项。
 

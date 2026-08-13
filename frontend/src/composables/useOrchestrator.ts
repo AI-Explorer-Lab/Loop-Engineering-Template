@@ -180,7 +180,7 @@ export function deliveryProgressFor(
       ? `Archiver 写入知识失败${knowledgeProgress}`
       : "Archiver 处理失败";
   } else if (archiveUnavailable) {
-    archive = "Archiver 未启用，Commit 为交付终态";
+    archive = "Archiver 状态不可用，Commit 为交付终态";
   } else if (archiveCapabilityUnknown) {
     archive = "Archiver 状态待确认，Commit 已完成";
   } else if (outboxItems.length) {
@@ -620,6 +620,7 @@ export function createOrchestrator() {
   async function createProject(payload: {
     name: string;
     repo_path: string;
+    backend_architecture_enabled?: boolean;
   }): Promise<ProjectData | null> {
     pageError.value = "";
     try {

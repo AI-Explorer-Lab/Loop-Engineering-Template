@@ -111,6 +111,7 @@ class NotificationSettingsRequest(BaseModel):
 class ProjectCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     repo_path: str = Field(min_length=1, max_length=2_000)
+    backend_architecture_enabled: bool = False
 
     @field_validator("name", "repo_path")
     @classmethod
