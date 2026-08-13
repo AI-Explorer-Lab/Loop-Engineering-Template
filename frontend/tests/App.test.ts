@@ -232,6 +232,47 @@ describe("App workbench", () => {
     wrapper.unmount();
   });
 
+  it("opens checkpoint details from the clickable cards while leaving Planner static", async () => {
+    localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
+    taskApi.getTask.mockResolvedValue(task("success", {
+      context: {
+        evaluation: {
+          context_sha256: "c".repeat(64),
+          stage: "evaluation",
+          knowledge: [{ knowledge_id: "k-1", title: "评估规则", type: "guideline", revision: 2 }],
+        },
+      },
+      evaluations: {
+        aggregate: {
+          context_sha256: "d".repeat(64),
+          syntax: { status: "passed" },
+          logic: { status: "passed" },
+          specification: { status: "passed" },
+          architecture: { status: "not_evaluated" },
+        },
+      },
+      commit: { commit_sha: "e".repeat(40) },
+      delivery_status: "archived",
+      archive: { summary: { delivery_status: "archived" }, outbox: { status: "completed" } },
+    }));
+    const { wrapper } = await mountAt("/monitor");
+
+    expect(wrapper.get(".checkpoint-card-static").text()).toContain("Planner");
+    expect(wrapper.get('[data-test="checkpoint-context"]').element.tagName).toBe("BUTTON");
+    expect(wrapper.find('[data-test="checkpoint-planner"]').exists()).toBe(false);
+
+    await wrapper.get('[data-test="checkpoint-context"]').trigger("click");
+    expect(wrapper.get('[data-test="checkpoint-detail-backdrop"]').text()).toContain("Context 快照详情");
+    expect(wrapper.text()).toContain("评估规则");
+
+    await wrapper.get('[aria-label="关闭检查点详情"]').trigger("click");
+    expect(wrapper.find('[data-test="checkpoint-detail-backdrop"]').exists()).toBe(false);
+
+    await wrapper.get('[data-test="checkpoint-evaluations"]').trigger("click");
+    expect(wrapper.get('[data-test="checkpoint-detail-backdrop"]').text()).toContain("四层评估详情");
+    wrapper.unmount();
+  });
+
   it("restores a legacy storage reference and shows the persisted diff", async () => {
     localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
     taskApi.getTask.mockResolvedValue(task("success"));
