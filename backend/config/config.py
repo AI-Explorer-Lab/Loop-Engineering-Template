@@ -112,6 +112,9 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "knowledge_actor_id": str(
                     item.get("knowledge_actor_id", "")
                 ).strip(),
+                "_created_from_registry": bool(
+                    item.get("_created_from_registry", False)
+                ),
                 "validation_profile": validation_profile,
                 "publish": item.get("publish", {}),
             }

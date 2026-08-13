@@ -78,6 +78,14 @@ cp backend/config/app.local.example.yaml \
 
 `agent.harness_enabled=true` 时，必须配置外部 Knowledge-Base 和 MCP registry。两者不随本仓库分发，路径不存在时服务会明确拒绝启动。MCP 使用本机 `stdio`，read/archive 模式严格分离并禁用网络；Generator 只接收冻结后的来源与哈希，不直接调用 MCP。
 
+## GitHub 认证
+
+发布功能通过 GitHub CLI（`gh`）使用本机已保存的 GitHub 凭据。凭据失效或权限过期时，执行下面的命令重新认证：
+
+```bash
+gh auth refresh -h github.com
+```
+
 ## 启动
 
 ```bash

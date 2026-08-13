@@ -89,3 +89,24 @@ def test_project_registry_rejects_unsafe_validation_paths() -> None:
 
     with pytest.raises(RuntimeError, match="safe relative path"):
         projects_from_settings(config)
+
+
+def test_created_project_registry_marker_survives_config_normalization(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "projects.json"
+    registry_path.write_text(
+        '[{"id":"read-notes","name":"Reading Notes","repo_root":".",'
+        '"default":true,"validation":{}}]\n',
+        encoding="utf-8",
+    )
+    config = {
+        "agent": {
+            "project_registry_path": str(registry_path),
+            "projects": [],
+        }
+    }
+
+    project = projects_from_settings(config)[0]
+
+    assert project["_created_from_registry"] is True
