@@ -298,8 +298,19 @@ code, pre { font-family: var(--mono); }
 .event-marker { position: relative; z-index: 1; width: 11px; height: 11px; margin-top: 3px; border: 3px solid #fff; border-radius: 50%; background: #7795d5; box-shadow: 0 0 0 1px #cdd8ec; }
 .event-row > div { min-width: 0; }
 .event-row strong { display: block; color: #344054; font-size: 0.72rem; }
-.event-row p { overflow: hidden; margin: 4px 0 0; color: #8993a2; font-family: var(--mono); font-size: 0.59rem; text-overflow: ellipsis; white-space: nowrap; }
+.event-summary { overflow: hidden; margin: 4px 0 0; color: #8993a2; font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
 .event-row time { color: #a0a8b4; font-family: var(--mono); font-size: 0.58rem; }
+.event-technical { margin-top: 5px; }
+.event-technical summary { width: fit-content; color: #a0a8b4; cursor: pointer; font-size: 0.58rem; }
+.event-technical pre { max-height: 180px; margin: 6px 0 0; padding: 8px; overflow: auto; border: 1px solid #e4e8ee; border-radius: 5px; background: #fafbfd; color: #68758a; font-family: var(--mono); font-size: 0.58rem; line-height: 1.5; white-space: pre-wrap; }
+.timeline-debug { margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf0f4; }
+.timeline-debug > summary { color: #8c96a5; cursor: pointer; font-size: 0.62rem; }
+.timeline-debug-list { display: grid; gap: 8px; max-height: 220px; margin-top: 8px; overflow: auto; }
+.timeline-debug-list article { padding: 8px; border: 1px solid #e7eaf0; border-radius: 6px; background: #fafbfd; }
+.timeline-debug-list article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.timeline-debug-list article strong { color: #68758a; font-family: var(--mono); font-size: 0.59rem; }
+.timeline-debug-list article time { color: #a0a8b4; font-family: var(--mono); font-size: 0.55rem; }
+.timeline-debug-list pre { max-height: 140px; margin: 6px 0 0; overflow: auto; color: #8993a2; font-family: var(--mono); font-size: 0.56rem; line-height: 1.45; white-space: pre-wrap; }
 .log-layout { display: grid; grid-template-rows: auto 1fr; height: 282px; overflow: hidden; border: 1px solid #e1e5ec; border-radius: 8px; }
 .log-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 6px; border-bottom: 1px solid #242b35; background: #171c24; }
 .log-tabs button { display: flex; min-width: 120px; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: #7e8998; text-align: left; }

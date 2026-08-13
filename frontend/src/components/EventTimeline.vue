@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { EventRecord } from "../types/task";
 import { useOrchestrator } from "../composables/useOrchestrator";
 
-defineProps<{ events: EventRecord[] }>();
+const props = defineProps<{ events: EventRecord[] }>();
 const store = useOrchestrator();
 
 const labels: Record<string, string> = {
@@ -19,23 +20,127 @@ const labels: Record<string, string> = {
   "validation.completed": "验证完成",
   "codex.turn.started": "Codex 开始处理",
   "codex.turn.completed": "Codex 返回结果",
+  "context.assembled": "运行上下文已准备",
+  "evaluation.completed": "结果评估完成",
+  "commit.completed": "代码已提交",
+  "archive.queued": "已进入归档队列",
+  "archive.completed": "知识归档完成",
   "review.recorded": "人工审核完成",
+  "permission.denied": "操作被阻止",
 };
 
 function eventType(event: EventRecord): string {
   return String(event.type || event.event || "event");
 }
 
+function payloadOf(event: EventRecord): Record<string, unknown> {
+  const payload = event.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+}
+
+function itemOf(event: EventRecord): Record<string, unknown> {
+  const item = payloadOf(event).item;
+  return item && typeof item === "object" && !Array.isArray(item)
+    ? item as Record<string, unknown>
+    : {};
+}
+
+function commandOf(event: EventRecord): string {
+  const command = payloadOf(event).command;
+  return Array.isArray(command) ? command.join(" ") : String(command || "");
+}
+
+function changedPaths(event: EventRecord): string[] {
+  const changes = itemOf(event).changes;
+  if (!Array.isArray(changes)) return [];
+  return changes
+    .filter((change): change is Record<string, unknown> =>
+      Boolean(change && typeof change === "object" && !Array.isArray(change)),
+    )
+    .map((change) => String(change.path || ""))
+    .filter(Boolean);
+}
+
+function isInternalEvent(event: EventRecord): boolean {
+  const type = eventType(event);
+  return type.startsWith("codex.item.")
+    || type === "prompt.saved"
+    || type === "turn.diff.updated";
+}
+
+const visibleEvents = computed(() =>
+  props.events.filter((event) => !isInternalEvent(event)),
+);
+const hiddenEvents = computed(() =>
+  props.events.filter((event) => isInternalEvent(event)),
+);
+
+function commandKind(command: string): "test" | "build" | "generic" {
+  const normalized = command.toLowerCase();
+  if (normalized.includes("unittest") || normalized.includes("pytest") || normalized.includes(" test")) {
+    return "test";
+  }
+  if (normalized.includes("build") || normalized.includes("compile")) return "build";
+  return "generic";
+}
+
 function title(event: EventRecord): string {
   const type = eventType(event);
+  if (type === "command.completed") {
+    const command = commandOf(event);
+    const passed = payloadOf(event).exit_code === 0;
+    const kind = commandKind(command);
+    if (kind === "test") return passed ? "测试通过" : "测试失败";
+    if (kind === "build") return passed ? "构建通过" : "构建失败";
+    return passed ? "命令执行成功" : "命令执行失败";
+  }
+  if (type === "validation.completed") {
+    return payloadOf(event).passed === true ? "验证通过" : "验证未通过";
+  }
+  if (type === "file.changed") return "代码已更新";
   return labels[type] || type.replaceAll(".", " · ");
 }
 
 function summary(event: EventRecord): string {
-  const payload = event.payload;
-  if (!payload || typeof payload !== "object") return "";
-  const value = JSON.stringify(payload, null, 0);
-  return value === "{}" ? "" : value;
+  const type = eventType(event);
+  const payload = payloadOf(event);
+  if (type === "command.completed") {
+    const kind = commandKind(commandOf(event));
+    const duration = Number(payload.duration_seconds);
+    const action = kind === "test" ? "运行单元测试" : kind === "build" ? "运行项目构建" : "执行验证命令";
+    return Number.isFinite(duration) && duration >= 0
+      ? `${action}，耗时 ${duration.toFixed(2)} 秒`
+      : `${action}已结束`;
+  }
+  if (type === "validation.completed") {
+    return String(payload.failure_summary || (payload.passed === true ? "所有检查已完成" : "检查未通过"));
+  }
+  if (type === "file.changed") {
+    const paths = changedPaths(event);
+    if (!paths.length) return "已产生文件变更";
+    const visible = paths.slice(0, 3).join("、");
+    return `修改文件：${visible}${paths.length > 3 ? ` 等 ${paths.length} 个文件` : ""}`;
+  }
+  if (type === "permission.denied") {
+    return String(payload.reason || "该操作被当前权限策略阻止");
+  }
+  if (typeof payload.message === "string") return payload.message;
+  if (typeof payload.failure_summary === "string") return payload.failure_summary;
+  return "";
+}
+
+function hasTechnicalDetails(event: EventRecord): boolean {
+  return Object.keys(payloadOf(event)).length > 0;
+}
+
+function technicalDetails(event: EventRecord): string {
+  return JSON.stringify(payloadOf(event), null, 2);
+}
+
+function rawType(event: EventRecord): string {
+  return eventType(event);
 }
 
 function formatTime(value: string): string {
@@ -56,16 +161,34 @@ function formatTime(value: string): string {
       <strong>事件时间线不可信，已停止展示</strong>
       <p>磁盘中的事件序号或 JSONL 结构不连续；系统不会用 seq 去重来掩盖损坏记录。</p>
     </div>
-    <div v-else-if="events.length" class="event-list">
-      <article v-for="event in events.slice().reverse()" :key="event.seq" class="event-row">
-        <span class="event-marker" />
-        <div>
-          <strong>{{ title(event) }}</strong>
-          <p v-if="summary(event)">{{ summary(event) }}</p>
+    <template v-else>
+      <div v-if="visibleEvents.length" class="event-list">
+        <article v-for="event in visibleEvents.slice().reverse()" :key="event.seq" class="event-row">
+          <span class="event-marker" />
+          <div class="event-copy">
+            <strong>{{ title(event) }}</strong>
+            <p v-if="summary(event)" class="event-summary">{{ summary(event) }}</p>
+            <details v-if="hasTechnicalDetails(event)" class="event-technical">
+              <summary>技术详情</summary>
+              <pre>{{ technicalDetails(event) }}</pre>
+            </details>
+          </div>
+          <time>{{ formatTime(event.timestamp) }}</time>
+        </article>
+      </div>
+      <div v-else class="empty-inline">正在处理，详细进度会在这里更新。</div>
+      <details v-if="hiddenEvents.length" class="timeline-debug">
+        <summary>查看隐藏的内部记录（{{ hiddenEvents.length }} 条）</summary>
+        <div class="timeline-debug-list">
+          <article v-for="event in hiddenEvents.slice().reverse()" :key="event.seq">
+            <div>
+              <strong>{{ rawType(event) }}</strong>
+              <time>{{ formatTime(event.timestamp) }}</time>
+            </div>
+            <pre>{{ technicalDetails(event) }}</pre>
+          </article>
         </div>
-        <time>{{ formatTime(event.timestamp) }}</time>
-      </article>
-    </div>
-    <div v-else class="empty-inline">运行事件出现后会在这里实时更新。</div>
+      </details>
+    </template>
   </section>
 </template>
