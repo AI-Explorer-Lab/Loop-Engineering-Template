@@ -46,17 +46,22 @@ class PlatformService:
         self._notification_lock = RLock()
 
     def projects(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "project_id": context.project_id,
-                "name": context.name,
-                "repo_root": str(context.repo_root),
-                "is_default": context.is_default,
-                "active_identifier": context.task_service.executor.active_task_id(),
-                "knowledge_actor_id": context.knowledge_actor_id,
-            }
-            for context in self.registry.all()
-        ]
+        return [self.project_data(context) for context in self.registry.all()]
+
+    @staticmethod
+    def project_data(context: ProjectContext) -> dict[str, Any]:
+        return {
+            "project_id": context.project_id,
+            "name": context.name,
+            "repo_root": str(context.repo_root),
+            "is_default": context.is_default,
+            "active_identifier": context.task_service.executor.active_task_id(),
+            "knowledge_actor_id": context.knowledge_actor_id,
+        }
+
+    def create_project(self, *, name: str, repo_path: str) -> dict[str, Any]:
+        context = self.registry.create_project(name=name, repo_path=repo_path)
+        return self.project_data(context)
 
     def history(
         self,

@@ -31,6 +31,7 @@ import {
   getNotificationSettings,
   getNotifications,
   getProjects,
+  createProject as createProjectRequest,
   markNotificationRead,
   updateNotificationSettings,
 } from "../api/platform";
@@ -574,6 +575,22 @@ export function createOrchestrator() {
     }
   }
 
+  async function createProject(payload: {
+    name: string;
+    repo_path: string;
+  }): Promise<ProjectData | null> {
+    pageError.value = "";
+    try {
+      const created = await createProjectRequest(payload);
+      projects.value = [...projects.value, created];
+      await selectProject(created.project_id, false);
+      return created;
+    } catch (error) {
+      recordError(error, "项目创建失败；尚未注册新项目。 ");
+      return null;
+    }
+  }
+
   async function initialize(): Promise<void> {
     initializing.value = true;
     try {
@@ -1016,6 +1033,7 @@ export function createOrchestrator() {
     resetRun,
     activateRun,
     selectProject,
+    createProject,
     refreshCurrent,
     refreshEventsAndLogs,
     submitTask,

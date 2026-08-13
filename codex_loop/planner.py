@@ -42,8 +42,12 @@ class PlannerRoleOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["ready", "manual_input_required"] = "ready"
+    generated_name: str = Field(default="", max_length=300)
     execution_mode: Literal["single", "queue"]
     subtasks: list[PlannedSubtask] = Field(min_length=1, max_length=50)
+    generated_acceptance_criteria: list[str] = Field(
+        default_factory=list, max_length=50, min_length=0
+    )
     unassigned_acceptance_ids: list[str] = Field(default_factory=list, max_length=50)
     warnings: list[str] = Field(default_factory=list, max_length=50)
 
@@ -135,8 +139,10 @@ class PlannerService:
     ) -> PlanDraft:
         resolved_id = str(plan_id or f"plan-{uuid4().hex[:16]}")
         self._validate_id(resolved_id)
-        criteria = self.acceptance_map(acceptance_criteria)
-        source_sha = _source_sha(requirement, criteria)
+        supplied_criteria = [str(item).strip() for item in acceptance_criteria]
+        if any(not item for item in supplied_criteria):
+            raise ValueError("acceptance_criteria must not contain blank strings")
+        criteria = self.acceptance_map(supplied_criteria) if supplied_criteria else {}
         directory = self.root / "drafts" / resolved_id
         if directory.exists():
             unexpected = {
@@ -154,26 +160,36 @@ class PlannerService:
             "name": str(name).strip(),
             "requirement": str(requirement).strip(),
             "acceptance_criteria": criteria,
-            "source_requirement_sha256": source_sha,
             "created_at": utc_now_iso(),
         }
-        _atomic_write_json(directory / "input.json", input_value)
         _atomic_write_json(directory / "context.json", context.to_dict())
         prompt = json.dumps(
             {
                 "task_name": input_value["name"],
                 "requirement": input_value["requirement"],
                 "acceptance_criteria": criteria,
+                "acceptance_criteria_mode": (
+                    "provided" if criteria else "generate_from_requirement"
+                ),
+                "task_name_mode": (
+                    "provided" if str(name).strip() else "generate_from_requirement"
+                ),
                 "allowed_actions": [
                     "choose single or queue",
                     "describe requirement slices",
                     "assign existing acceptance ids",
                     "order queue subtasks linearly",
                 ],
-                "forbidden_fields": [
-                    "dependencies",
-                    "new_acceptance_criteria",
-                ],
+                "generated_acceptance_criteria": (
+                    "When acceptance_criteria_mode is generate_from_requirement, "
+                    "return 1-8 concrete, observable acceptance criteria in "
+                    "generated_acceptance_criteria. Otherwise return an empty list."
+                ),
+                "generated_name": (
+                    "When task_name_mode is generate_from_requirement, return a "
+                    "short, concrete task name in generated_name."
+                ),
+                "forbidden_fields": ["dependencies"],
                 "context": context.to_dict(),
             },
             ensure_ascii=False,
@@ -186,6 +202,29 @@ class PlannerService:
             artifact_dir=directory / "role",
         )
         output = PlannerRoleOutput.model_validate(role.output.model_dump())
+        requested_name = str(name).strip()
+        generated_name = str(output.generated_name).strip()
+        if not requested_name and not generated_name:
+            generated_name = str(requirement).strip().splitlines()[0][:120]
+        input_value["name"] = requested_name or generated_name
+        if criteria and output.generated_acceptance_criteria:
+            raise ValueError(
+                "planner must not invent acceptance criteria when criteria were supplied"
+            )
+        if not criteria:
+            generated = [
+                str(item).strip()
+                for item in output.generated_acceptance_criteria
+            ]
+            if not generated or any(not item for item in generated):
+                raise ValueError(
+                    "planner must generate at least one acceptance criterion"
+                )
+            criteria = self.acceptance_map(generated)
+        source_sha = _source_sha(requirement, criteria)
+        input_value["acceptance_criteria"] = criteria
+        input_value["source_requirement_sha256"] = source_sha
+        _atomic_write_json(directory / "input.json", input_value)
         referenced = {
             criterion
             for subtask in output.subtasks

@@ -11,6 +11,8 @@ from dynaconf import Dynaconf
 
 from codex_loop.validation_profile import ValidationProfile
 
+from .project_store import load_created_projects
+
 
 CONFIG_FILE = Path(__file__).with_name("app.yaml")
 LOCAL_CONFIG_FILE = Path(__file__).with_name("app.local.yaml")
@@ -52,6 +54,9 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
 
     agent = config.get("agent", {}) or {}
     configured = agent.get("projects", []) or []
+    if isinstance(configured, (str, bytes)):
+        raise RuntimeError("agent.projects must be a list")
+    configured = [*configured, *load_created_projects(config)]
     if not configured:
         root = repo_root_from_settings(config)
         return [
@@ -68,8 +73,6 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 ),
             }
         ]
-    if isinstance(configured, (str, bytes)):
-        raise RuntimeError("agent.projects must be a list")
     projects: list[dict[str, object]] = []
     seen: set[str] = set()
     for index, item in enumerate(configured):

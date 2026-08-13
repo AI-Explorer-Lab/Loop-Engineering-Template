@@ -110,6 +110,25 @@ def test_plan_preview_is_created_without_starting_a_target() -> None:
     assert service.create_had_running_loop is False
 
 
+def test_plan_preview_allows_codex_to_generate_acceptance_criteria() -> None:
+    service = FakePlanService()
+    with client(service) as api:
+        response = api.post(
+            "/api/plans",
+            json={
+                "name": "Reading Notes",
+                "requirement": "做一个最小的命令行笔记应用",
+            },
+        )
+
+    assert response.status_code == 200
+    assert service.created == {
+        "name": "Reading Notes",
+        "requirement": "做一个最小的命令行笔记应用",
+        "acceptance_criteria": [],
+    }
+
+
 def test_plan_confirmation_carries_the_human_edited_draft() -> None:
     service = FakePlanService()
     edited = {"plan_id": "plan-fixture", "status": "ready", "name": "Edited"}

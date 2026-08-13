@@ -16,6 +16,11 @@ import type {
 const store = useOrchestrator();
 const router = useRouter();
 const mode = ref<"task" | "queue" | "auto">("task");
+const showProjectForm = ref(false);
+const projectName = ref("");
+const projectPath = ref("");
+const projectFormError = ref("");
+const creatingProject = ref(false);
 const disabled = computed(() =>
   store.submitting.value ||
   store.planning.value ||
@@ -40,6 +45,30 @@ async function confirmPlan(payload: { reviewer: string; draft: PlanDraft }): Pro
     await router.push("/monitor");
   }
 }
+
+async function createProject(): Promise<void> {
+  const name = projectName.value.trim();
+  const repoPath = projectPath.value.trim();
+  if (!name || !repoPath) {
+    projectFormError.value = "请填写项目名称和绝对路径。";
+    return;
+  }
+  if (!repoPath.startsWith("/")) {
+    projectFormError.value = "目标路径必须是绝对路径，例如 /Users/mon/Documents/read-notes。";
+    return;
+  }
+  projectFormError.value = "";
+  creatingProject.value = true;
+  const created = await store.createProject({ name, repo_path: repoPath });
+  creatingProject.value = false;
+  if (!created) {
+    projectFormError.value = store.pageError.value || "项目创建失败。";
+    return;
+  }
+  projectName.value = "";
+  projectPath.value = "";
+  showProjectForm.value = false;
+}
 </script>
 
 <template>
@@ -54,8 +83,24 @@ async function confirmPlan(payload: { reviewer: string; draft: PlanDraft }): Pro
         <span>当前项目</span>
         <strong>{{ store.activeProject.value?.name || "正在读取" }}</strong>
         <code>{{ store.activeProject.value?.repo_root || "—" }}</code>
+        <button class="secondary-button project-create-trigger" type="button" data-test="open-create-project" @click="showProjectForm = !showProjectForm">
+          {{ showProjectForm ? "收起新建项目" : "＋ 新建项目" }}
+        </button>
       </div>
     </header>
+
+    <section v-if="showProjectForm" class="surface inline-project-form" data-test="create-project-panel">
+      <div class="surface-heading compact-heading">
+        <div><span class="section-kicker">创建本地项目</span><h2>填写项目名称和绝对路径</h2></div>
+      </div>
+      <form class="project-form-grid" @submit.prevent="createProject">
+        <label>项目名称<input v-model="projectName" data-test="create-project-name" :disabled="creatingProject" placeholder="例如：read-notes" /></label>
+        <label>绝对路径<input v-model="projectPath" data-test="create-project-path" :disabled="creatingProject" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
+        <p class="field-hint">目标路径必须是尚不存在的新目录。后端会自动初始化 Git、生成 .gitignore 并注册项目。</p>
+        <p v-if="projectFormError" class="form-error" role="alert">{{ projectFormError }}</p>
+        <div class="button-row"><button class="secondary-button" type="button" :disabled="creatingProject" @click="showProjectForm = false">取消</button><button class="primary-button" type="submit" :disabled="creatingProject">{{ creatingProject ? "正在创建…" : "创建并切换项目" }}</button></div>
+      </form>
+    </section>
 
     <div class="create-layout">
       <section class="surface form-surface">

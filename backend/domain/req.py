@@ -108,20 +108,50 @@ class NotificationSettingsRequest(BaseModel):
     browser: bool = True
 
 
+class ProjectCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    repo_path: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("name", "repo_path")
+    @classmethod
+    def normalize_project_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("project value cannot be blank")
+        return normalized
+
+
 class QueueVersionRequest(BaseModel):
     expected_updated_at: str | None = None
 
 
-class PlanCreateRequest(TaskCreateRequest):
-    name: str = Field(min_length=1, max_length=500)
+class PlanCreateRequest(BaseModel):
+    name: str = Field(default="", max_length=500)
+    requirement: str = Field(min_length=1, max_length=20_000)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=50)
 
     @field_validator("name")
     @classmethod
     def validate_plan_name(cls, value: str) -> str:
-        name = value.strip()
-        if not name:
-            raise ValueError("name cannot be blank")
-        return name
+        return value.strip()
+
+    @field_validator("requirement")
+    @classmethod
+    def validate_plan_requirement(cls, value: str) -> str:
+        requirement = value.strip()
+        if not requirement:
+            raise ValueError("requirement cannot be blank")
+        return requirement
+
+    @field_validator("acceptance_criteria")
+    @classmethod
+    def validate_optional_acceptance_criteria(cls, values: list[str]) -> list[str]:
+        normalized = [str(value).strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("acceptance_criteria cannot contain blank strings")
+        if any(len(value) > 4_000 for value in normalized):
+            raise ValueError("each acceptance criterion must be at most 4000 characters")
+        return normalized
 
 
 class PlanConfirmRequest(BaseModel):

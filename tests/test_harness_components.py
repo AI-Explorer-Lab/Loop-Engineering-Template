@@ -288,6 +288,50 @@ def test_planner_only_maps_original_acceptance_ids_and_waits_for_confirmation(
         )
 
 
+def test_planner_generates_acceptance_criteria_when_user_provides_only_requirement(
+    tmp_path: Path,
+) -> None:
+    output = PlannerRoleOutput(
+        execution_mode="single",
+        generated_name="实现最小笔记应用",
+        generated_acceptance_criteria=[
+            "运行 note.py add 后，笔记会保存到 notes.json",
+            "运行 note.py list 能输出已保存笔记",
+        ],
+        subtasks=[
+            PlannedSubtask(
+                sequence=1,
+                title="实现笔记命令行功能",
+                requirement_slice="实现 add 和 list 命令，并为可观察行为补充测试",
+                source_acceptance_ids=["AC-001", "AC-002"],
+            )
+        ],
+    )
+    runner = FakeRoleRunner({"planner": output})
+    service = PlannerService(tmp_path, runner)  # type: ignore[arg-type]
+    context = ContextSnapshot(
+        stage="planner",
+        query="笔记",
+        actor="local-user",
+        snapshot_sha256="f" * 64,
+    )
+
+    draft = service.generate(
+        plan_id="plan-generated-001",
+        name="",
+        requirement="做一个最小的命令行笔记应用",
+        acceptance_criteria=[],
+        context=context,
+    )
+
+    assert draft.acceptance_criteria == {
+        "AC-001": "运行 note.py add 后，笔记会保存到 notes.json",
+        "AC-002": "运行 note.py list 能输出已保存笔记",
+    }
+    assert draft.name == "实现最小笔记应用"
+    assert "generate_from_requirement" in runner.prompts[0]
+
+
 def evaluation_context(item: KnowledgeItem | None) -> ContextSnapshot:
     return merge_context_snapshots(
         "evaluation",

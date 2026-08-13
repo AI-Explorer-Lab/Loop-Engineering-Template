@@ -62,13 +62,15 @@ cp backend/config/app.local.example.yaml \
   backend/config/app.local.yaml
 ```
 
-然后在忽略提交的 `app.local.yaml` 中填写：
+然后在忽略提交的 `app.local.yaml` 中保留服务级配置和已有项目；新项目通过前端项目页的“新建项目”创建，不需要手动编辑项目列表。项目创建后会写入控制面忽略目录中的 `projects.json`。
+
+服务级配置包括：
 
 - 外部 Knowledge-Base 根目录；
 - 外部 MCP `registry.json`；
-- 每个被管理项目的绝对路径和知识身份；
+- 已有被管理项目的绝对路径和知识身份；
 - 可选的固定发布远端（`publish.enabled`、`remote_name`、`remote_url`）；
-- 项目自己的验证命令、测试目录和依赖目录。
+- 项目自己的验证命令、测试目录和依赖目录。通过前端创建的新项目使用默认 Python `unittest` 验证配置。
 
 验证命令是控制面可信配置，不接受模型动态生成；它们以参数数组保存，通过 `shell=False` 在原有外部沙箱中执行。
 

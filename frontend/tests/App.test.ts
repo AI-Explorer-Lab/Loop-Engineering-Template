@@ -282,16 +282,13 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="auto-mode"]').trigger("click");
-    await wrapper.get('[data-test="plan-name"]').setValue("Filtering plan");
     await wrapper.get('[data-test="plan-requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="plan-criterion-0"]').setValue("Filtering works");
     await wrapper.get('[data-test="plan-form"]').trigger("submit");
     await flushPromises();
 
     expect(planApi.createPlan).toHaveBeenCalledWith({
-      name: "Filtering plan",
       requirement: "Add filtering",
-      acceptance_criteria: ["Filtering works"],
+      acceptance_criteria: [],
     });
     expect(taskApi.createTask).not.toHaveBeenCalled();
     expect(wrapper.get('[data-test="plan-preview"]').text()).toContain("AC-001");

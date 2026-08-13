@@ -41,8 +41,10 @@ export interface ReviewPayload {
   commit_subject: string;
 }
 
-export interface PlanCreatePayload extends TaskCreatePayload {
-  name: string;
+export interface PlanCreatePayload {
+  name?: string;
+  requirement: string;
+  acceptance_criteria?: string[];
 }
 
 export interface PlannedSubtask {

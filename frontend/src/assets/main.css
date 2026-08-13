@@ -166,6 +166,13 @@ code, pre { font-family: var(--mono); }
 .project-context-card code { overflow: hidden; color: #7e8897; font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
 .create-layout { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 20px; align-items: start; }
 .form-surface { padding: 28px 30px 32px; }
+.inline-project-form { padding: 22px 26px 24px; }
+.project-context-card .project-create-trigger { margin-top: 10px; }
+.project-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.project-form-grid > .field-hint, .project-form-grid > .form-error, .project-form-grid > .button-row { grid-column: 1 / -1; }
+.project-form-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 0.71rem; font-weight: 700; }
+.project-form-grid input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #d7dde6; border-radius: 7px; outline: 0; background: #fff; color: var(--text); }
+.project-form-grid input:focus { border-color: #6b93ee; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.09); }
 .local-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 99px; background: var(--green-soft); color: var(--green); font-size: 0.67rem; font-weight: 700; }
 .local-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .segmented-control { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 3px 0 25px; padding: 4px; border-radius: 8px; background: #f0f2f5; }
@@ -440,6 +447,10 @@ code, pre { font-family: var(--mono); }
 .pagination span { color: #7d8794; font-family: var(--mono); font-size: 0.67rem; }
 
 .project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+.project-create-form { max-width: 760px; padding: 24px 26px 26px; }
+.project-create-form .task-form { grid-template-columns: 1fr 1fr; }
+.project-create-form .task-form > .field-hint, .project-create-form .task-form > .form-error, .project-create-form .button-row { grid-column: 1 / -1; }
+.button-row { display: flex; justify-content: flex-end; gap: 9px; }
 .project-card { display: grid; min-height: 260px; align-content: start; }
 .project-card.selected { border-color: #a9c1f2; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.05), var(--shadow); }
 .project-card-top { display: flex; align-items: center; justify-content: space-between; }

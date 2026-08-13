@@ -70,6 +70,7 @@ Knowledge-Base 和 MCP registry。每个项目还需配置自己的验证命令�
 | `GET` | `/api/queues/{queue_id}/report` | 读取长任务汇总报告 |
 | `GET` | `/api/queues/{queue_id}/diff` | 读取已批准的最终累计 Diff |
 | `GET` | `/api/projects` | 查看已登记项目 |
+| `POST` | `/api/projects` | 创建本地 Git 项目并立即注册 |
 | `GET` | `/api/capabilities` | 只读查看 Knowledge-Base、MCP、Skills 和归档积压 |
 | `GET` | `/api/metrics` | 从文件记录计算成功率、分层失败、修复与交付指标 |
 | `GET` | `/api/history` | 分页查询任务和队列历史 |
@@ -88,6 +89,8 @@ curl -X POST http://127.0.0.1:8100/api/tasks \
 ```
 
 API 在单工作线程中执行 Codex，因此 HTTP 请求不会等待开发和测试结束。同一时间只能有一个活动任务；已有未完成任务时，先使用恢复接口，不要创建新任务。
+
+新项目通过项目页的“新建项目”创建，提交项目名称和绝对目标路径即可。后端只接受尚不存在的新目录，会创建目录、初始化 Git、提交初始 `.gitignore`，并写入默认 Python `unittest` 验证配置。项目注册保存在控制面 `.codex-orchestrator/projects.json`，不再要求为每个新项目手动编辑 `app.local.yaml`。
 
 创建长任务时，`subtasks` 数组顺序就是唯一执行顺序，不接收依赖字段。每项分别包含 `requirement` 和至少一条 `acceptance_criteria`。当前子任务机器流程结束后，仍使用 `/api/tasks/{task_id}`、`report`、`diff` 和 `review` 查看及审查；批准后后台单工作线程才会执行下一项。
 

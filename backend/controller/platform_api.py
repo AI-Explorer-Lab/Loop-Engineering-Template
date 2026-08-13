@@ -16,7 +16,7 @@ from ..domain.res import (
     NotificationSettingsData,
     ProjectData,
 )
-from ..domain.req import NotificationSettingsRequest
+from ..domain.req import NotificationSettingsRequest, ProjectCreateRequest
 from ..exceptions.business_exception import BusinessException
 from ..service.platform_service import PlatformService
 
@@ -44,6 +44,19 @@ def _project_id(
 @router.get("/projects", response_model=ApiResponse[list[ProjectData]])
 async def list_projects(request: Request) -> ApiResponse[list[ProjectData]]:
     return ApiResponse(data=_service(request).projects())
+
+
+@router.post("/projects", response_model=ApiResponse[ProjectData], status_code=201)
+async def create_project(
+    payload: ProjectCreateRequest, request: Request
+) -> ApiResponse[ProjectData]:
+    return ApiResponse(
+        data=await run_in_threadpool(
+            _service(request).create_project,
+            name=payload.name,
+            repo_path=payload.repo_path,
+        )
+    )
 
 
 @router.get("/capabilities", response_model=ApiResponse[dict])
