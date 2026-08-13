@@ -17,8 +17,14 @@ const repositoryName = computed(() =>
 const configuredRemote = computed(() =>
   String(store.activeProject.value?.publish_remote_url || "").trim(),
 );
+const autoCreateRemote = computed(() =>
+  Boolean(store.activeProject.value?.publish_auto_create_remote),
+);
 const publishConfigured = computed(() =>
-  Boolean(store.activeProject.value?.publish_enabled && configuredRemote.value),
+  Boolean(
+    (store.activeProject.value?.publish_enabled && configuredRemote.value)
+    || autoCreateRemote.value,
+  ),
 );
 const eligible = computed(() => Boolean(store.task.value) &&
   !store.task.value?.queue_id &&
@@ -49,7 +55,10 @@ const actionMessage = computed(() => {
   if (task.delivery_status !== "archived") return "需要先完成 commit 和本地归档。";
   if (!commit.value) return "缺少已确认的 commit 证据。";
   if (!publishConfigured.value) {
-    return `尚未配置固定 GitHub 远端；首次发布时请先创建仓库“${repositoryName.value}”并配置远端。`;
+    return "当前项目未启用 GitHub 发布，请先在项目配置中启用。";
+  }
+  if (!configuredRemote.value && autoCreateRemote.value) {
+    return `尚未配置固定 GitHub 远端；点击发布后将创建私有仓库“${repositoryName.value}”并自动绑定、推送。`;
   }
   return `点击后由机器把当前已审核 commit 推送到固定远端；仓库名：${repositoryName.value}。`;
 });
@@ -87,7 +96,7 @@ async function publish(): Promise<void> {
       <div v-if="published" class="global-success"><strong>已发布到 GitHub</strong><span>{{ String(store.task.value.publish.published_at || '') }} · {{ String(store.task.value.publish.branch || '') }}</span></div>
       <div class="review-form publish-action" data-test="publish-action">
         <label>发布确认人<input v-model="reviewer" maxlength="200" placeholder="填写你的姓名或标识" :disabled="published" /></label>
-        <label class="check-row"><input v-model="confirmed" type="checkbox" :disabled="published" />我确认将上述 commit 推送到已配置的固定 GitHub 远端。</label>
+        <label class="check-row"><input v-model="confirmed" type="checkbox" :disabled="published" />我确认将上述 commit 推送到固定 GitHub 远端<span v-if="!configuredRemote && autoCreateRemote">（必要时自动创建私有仓库）</span>。</label>
         <button class="primary-button" type="button" :disabled="actionDisabled || !confirmed || !reviewer.trim()" @click="publish">{{ actionLabel }}</button>
         <p class="field-hint">{{ actionMessage }}</p>
       </div>

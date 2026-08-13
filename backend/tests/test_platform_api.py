@@ -115,6 +115,7 @@ def test_projects_history_events_logs_and_notifications_share_persisted_state(
     assert projects.json()["data"][0]["project_id"] == "accounting"
     assert projects.json()["data"][0]["publish_repository_name"] == "accounting"
     assert projects.json()["data"][0]["publish_enabled"] is False
+    assert projects.json()["data"][0]["publish_auto_create_remote"] is False
     assert history.json()["data"]["total"] == 1
     assert history.json()["data"]["items"][0]["identifier"] == task.task_id
     assert events.json()["data"]["items"][0]["type"] == "run.completed"

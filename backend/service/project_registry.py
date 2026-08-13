@@ -34,6 +34,7 @@ class ProjectContext:
     is_default: bool
     knowledge_actor_id: str
     publish_enabled: bool
+    publish_auto_create_remote: bool
     publish_remote_name: str
     publish_remote_url: str
     publish_repository_name: str
@@ -105,6 +106,11 @@ class ProjectRegistry:
             "default": False,
             "is_default": False,
             "knowledge_actor_id": "local-user",
+            "publish": {
+                "auto_create_remote": True,
+                "remote_name": "origin",
+                "visibility": "private",
+            },
             "validation": default_project_validation(),
         }
         item["validation_profile"] = ValidationProfile.from_mapping(item["validation"])
@@ -135,6 +141,9 @@ class ProjectRegistry:
         publish = item.get("publish", {})
         publish_config = publish if isinstance(publish, dict) else {}
         publish_enabled = bool(publish_config.get("enabled", False))
+        publish_auto_create_remote = bool(
+            publish_config.get("auto_create_remote", item.get("_created_from_registry", False))
+        )
         publish_remote_name = str(
             publish_config.get("remote_name", "origin")
         ).strip() or "origin"
@@ -198,6 +207,7 @@ class ProjectRegistry:
             is_default=bool(item["is_default"]),
             knowledge_actor_id=str(item.get("knowledge_actor_id", "")),
             publish_enabled=publish_enabled,
+            publish_auto_create_remote=publish_auto_create_remote,
             publish_remote_name=publish_remote_name,
             publish_remote_url=publish_remote_url,
             publish_repository_name=publish_repository_name,
@@ -225,10 +235,28 @@ class ProjectRegistry:
     @staticmethod
     def _publish_service(root: Path, item: dict[str, object]) -> GitPublishService | None:
         publish = item.get("publish", {})
-        if not isinstance(publish, dict) or not bool(publish.get("enabled", False)):
-            return None
-        remote_name = str(publish.get("remote_name", "origin")).strip()
-        remote_url = str(publish.get("remote_url", "")).strip()
-        if not remote_url:
+        publish_config = publish if isinstance(publish, dict) else {}
+        auto_create_remote = bool(
+            publish_config.get("auto_create_remote", item.get("_created_from_registry", False))
+        )
+        publish_enabled = bool(publish_config.get("enabled", False))
+        if (
+            publish_enabled
+            and not str(publish_config.get("remote_url", "")).strip()
+            and not auto_create_remote
+        ):
             raise RuntimeError("publish.remote_url is required when publication is enabled")
-        return GitPublishService(root, remote_name=remote_name, remote_url=remote_url)
+        if not publish_enabled and not auto_create_remote:
+            return None
+        remote_name = str(publish_config.get("remote_name", "origin")).strip() or "origin"
+        remote_url = str(publish_config.get("remote_url", "")).strip()
+        return GitPublishService(
+            root,
+            remote_name=remote_name,
+            remote_url=remote_url,
+            auto_create_remote=auto_create_remote,
+            repository_name=str(
+                publish_config.get("repository_name", root.name)
+            ).strip(),
+            visibility=str(publish_config.get("visibility", "private")),
+        )

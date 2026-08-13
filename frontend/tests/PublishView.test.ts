@@ -77,4 +77,27 @@ describe("PublishView", () => {
 
     expect(store.publishCurrentTask).toHaveBeenCalledWith("Reviewer");
   });
+
+  it("offers explicit remote creation when the project has no remote", async () => {
+    store.task.value = task({
+      review_status: "approved",
+      delivery_status: "archived",
+      commit: { commit_sha: "b".repeat(40) },
+    });
+    store.activeProject.value = project({
+      publish_enabled: false,
+      publish_auto_create_remote: true,
+      publish_remote_url: "",
+      publish_repository_name: "reading-notes",
+    });
+    store.publishCurrentTask.mockResolvedValue(true);
+
+    const wrapper = mountView();
+    expect(wrapper.text()).toContain("将创建私有仓库“reading-notes”");
+    await wrapper.get('[data-test="publish-action"] input').setValue("Reviewer");
+    await wrapper.get('[data-test="publish-action"] input[type="checkbox"]').setValue(true);
+    await wrapper.get('[data-test="publish-action"] button').trigger("click");
+
+    expect(store.publishCurrentTask).toHaveBeenCalledWith("Reviewer");
+  });
 });

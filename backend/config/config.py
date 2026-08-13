@@ -56,7 +56,11 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
     configured = agent.get("projects", []) or []
     if isinstance(configured, (str, bytes)):
         raise RuntimeError("agent.projects must be a list")
-    configured = [*configured, *load_created_projects(config)]
+    created_projects = [
+        {**item, "_created_from_registry": True}
+        for item in load_created_projects(config)
+    ]
+    configured = [*configured, *created_projects]
     if not configured:
         root = repo_root_from_settings(config)
         return [

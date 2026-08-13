@@ -214,6 +214,7 @@ export interface ProjectData {
   active_identifier: string | null;
   knowledge_actor_id: string;
   publish_enabled?: boolean;
+  publish_auto_create_remote?: boolean;
   publish_remote_name?: string;
   publish_remote_url?: string;
   publish_repository_name?: string;

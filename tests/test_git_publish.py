@@ -81,3 +81,56 @@ def test_publish_rejects_a_commit_other_than_delivery_evidence(tmp_path: Path) -
 
     with pytest.raises(PublishError, match="confirmed commit"):
         service.publish(task.task_id, commit_sha="0" * 40, reviewer="Reviewer")
+
+
+def test_auto_create_remote_binds_a_new_github_remote_before_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, task, _commit_sha, remote = prepared_task(tmp_path)
+    repository = tmp_path / "repository"
+    git(repository, "remote", "remove", "origin")
+    service = GitPublishService(
+        tmp_path / "control",
+        remote_name="origin",
+        remote_url="",
+        auto_create_remote=True,
+        repository_name="reading-notes",
+        store=store,
+    )
+    monkeypatch.setattr(service, "_create_github_repository", lambda: str(remote))
+
+    resolved = service._resolve_remote(repository)
+
+    assert resolved == str(remote)
+    assert git(repository, "remote", "get-url", "origin") == str(remote)
+
+
+def test_create_github_repository_uses_authenticated_account_and_private_visibility(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _task, _commit_sha, _remote = prepared_task(tmp_path)
+    service = GitPublishService(
+        tmp_path / "control",
+        remote_name="origin",
+        remote_url="",
+        auto_create_remote=True,
+        repository_name="reading-notes",
+        store=store,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(program: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        assert program == "gh"
+        calls.append(arguments)
+        if arguments[:2] == ("api", "user"):
+            return subprocess.CompletedProcess([program, *arguments], 0, "AI-Explorer-Lab\n", "")
+        if arguments[:2] == ("repo", "view"):
+            return subprocess.CompletedProcess([program, *arguments], 1, "", "not found")
+        return subprocess.CompletedProcess([program, *arguments], 0, "created\n", "")
+
+    monkeypatch.setattr(GitPublishService, "_run_external", staticmethod(fake_run))
+
+    assert service._create_github_repository() == (
+        "https://github.com/AI-Explorer-Lab/reading-notes.git"
+    )
+    assert calls[-1] == ("repo", "create", "AI-Explorer-Lab/reading-notes", "--private")

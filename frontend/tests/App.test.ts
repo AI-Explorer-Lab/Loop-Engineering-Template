@@ -232,6 +232,40 @@ describe("App workbench", () => {
     wrapper.unmount();
   });
 
+  it("refreshes the project runtime status when a task starts and is polled", async () => {
+    const idleProject = {
+      project_id: "default",
+      name: "Accounting-Software",
+      repo_root: "/repo",
+      is_default: true,
+      active_identifier: null,
+      knowledge_actor_id: "zhangsan",
+    };
+    const runningProject = { ...idleProject, active_identifier: "task-1" };
+    platformApi.getProjects
+      .mockReset()
+      .mockResolvedValueOnce([idleProject])
+      .mockResolvedValue([runningProject]);
+    taskApi.createTask.mockResolvedValue(task("accepted"));
+    taskApi.getTask.mockResolvedValue(task("running"));
+    const { wrapper, router } = await mountAt("/create");
+
+    await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
+    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="task-form"]').trigger("submit");
+    await flushPromises();
+
+    await router.push("/projects");
+    await flushPromises();
+    expect(wrapper.get(".project-runtime").text()).toContain("运行中 · task-1");
+    expect(platformApi.getProjects).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(platformApi.getProjects).toHaveBeenCalledTimes(3);
+    wrapper.unmount();
+  });
+
   it("opens checkpoint details from the clickable cards while leaving Planner static", async () => {
     localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
     taskApi.getTask.mockResolvedValue(task("success", {

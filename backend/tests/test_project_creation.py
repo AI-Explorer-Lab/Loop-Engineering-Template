@@ -50,6 +50,7 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     created = response.json()["data"]
     assert created["project_id"] == "read-notes"
     assert created["repo_root"] == str(target)
+    assert created["publish_auto_create_remote"] is True
     assert (target / ".gitignore").is_file()
     assert ".codex-runtime/" in (target / ".gitignore").read_text(encoding="utf-8")
     harness_config = target / ".harness" / "project.json"
@@ -76,5 +77,6 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     restarted = ProjectRegistry(config)
     try:
         assert restarted.get("read-notes").repo_root == target
+        assert restarted.get("read-notes").publish_auto_create_remote is True
     finally:
         restarted.close(wait=True)

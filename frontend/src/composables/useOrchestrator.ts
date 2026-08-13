@@ -396,6 +396,14 @@ export function createOrchestrator() {
     writeStorage(kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY, runIdentifier);
   }
 
+  async function refreshProjects(): Promise<void> {
+    try {
+      projects.value = await getProjects();
+    } catch {
+      // Project runtime status is supplemental; do not interrupt task polling when it fails.
+    }
+  }
+
   function schedulePoll(): void {
     clearPollTimer();
     pollTimer = setTimeout(() => void refreshCurrent(), POLL_INTERVAL_MS);
@@ -509,7 +517,11 @@ export function createOrchestrator() {
       task.value = latest;
       pageError.value = "";
       if (remember) rememberRun("task", taskId);
-      await Promise.all([loadTaskArtifacts(taskId), refreshEventsAndLogs()]);
+      await Promise.all([
+        loadTaskArtifacts(taskId),
+        refreshEventsAndLogs(),
+        refreshProjects(),
+      ]);
       if (shouldPollTask(latest)) {
         schedulePoll();
       } else {
@@ -546,7 +558,11 @@ export function createOrchestrator() {
       queue.value = latest;
       pageError.value = "";
       if (remember) rememberRun("queue", queueId);
-      const requests: Promise<void>[] = [loadQueueArtifacts(queueId), refreshEventsAndLogs()];
+      const requests: Promise<void>[] = [
+        loadQueueArtifacts(queueId),
+        refreshEventsAndLogs(),
+        refreshProjects(),
+      ];
       if (latest.current_task_id) requests.push(loadQueueTask(latest.current_task_id));
       await Promise.all(requests);
       if (ACTIVE_QUEUE_STATUSES.has(latest.status)) {
@@ -740,7 +756,7 @@ export function createOrchestrator() {
       task.value = accepted;
       rememberRun("task", accepted.task_id);
       schedulePoll();
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       connectEventStream();
       return accepted;
     } catch (error) {
@@ -760,7 +776,7 @@ export function createOrchestrator() {
       queue.value = accepted;
       rememberRun("queue", accepted.queue_id);
       schedulePoll();
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       connectEventStream();
       return accepted;
     } catch (error) {
@@ -886,7 +902,7 @@ export function createOrchestrator() {
         reviewer,
       });
       task.value = updated;
-      await refreshEventsAndLogs();
+      await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       return true;
     } catch (error) {
       recordError(error, "GitHub 发布失败。");
