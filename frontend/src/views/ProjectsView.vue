@@ -12,7 +12,7 @@ const projectPath = ref("");
 const projectType = ref<"python" | "frontend" | "fullstack">("python");
 const knowledgeActorId = ref("");
 const selectedValidationOptions = ref<string[]>(["python_tests"]);
-const backendArchitectureEnabled = ref(false);
+const backendArchitectureEnabled = ref(true);
 const formError = ref("");
 const creating = ref(false);
 const validationOptions = computed(() => projectType.value === "python"
@@ -34,6 +34,7 @@ watch(projectType, (value) => {
   selectedValidationOptions.value = value === "python"
     ? ["python_tests"]
     : value === "fullstack" ? ["python_tests", "frontend_tests"] : ["frontend_tests"];
+  backendArchitectureEnabled.value = value !== "frontend";
 });
 
 function toggleValidationOption(id: string, checked: boolean): void {
@@ -78,7 +79,7 @@ async function create(): Promise<void> {
   knowledgeActorId.value = "";
   projectType.value = "python";
   selectedValidationOptions.value = ["python_tests"];
-  backendArchitectureEnabled.value = false;
+  backendArchitectureEnabled.value = true;
   showCreateForm.value = false;
   await router.push("/create");
 }
@@ -104,8 +105,8 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creating || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}</span></label></fieldset>
         <label class="project-architecture-toggle">
-          <input v-model="backendArchitectureEnabled" data-test="backend-architecture-enabled" type="checkbox" :disabled="creating" />
-          <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次</small></span>
+          <input v-model="backendArchitectureEnabled" data-test="backend-architecture-enabled" type="checkbox" :disabled="creating || projectType === 'frontend'" />
+          <span><strong>启用后端架构初始化</strong><small>{{ projectType === "frontend" ? "纯前端项目不适用" : "后端/全栈项目默认启用；第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次" }}</small></span>
         </label>
         <p class="field-hint">后端只接受绝对路径；目标路径必须是尚不存在的新目录</p>
         <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
