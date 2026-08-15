@@ -1,9 +1,27 @@
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Any
 
 from ..service.project_environment import validate_project_name as validate_project_name_value
+
+
+def _normalize_acceptance_criteria(values: list[str]) -> list[str]:
+    """Accept either one item per list entry or newline-separated text."""
+
+    normalized: list[str] = []
+    for value in values:
+        for line in str(value).splitlines():
+            criterion = line.strip()
+            criterion = re.sub(
+                r"^(?:\d+[.)、]\s*|[-*+]\s+)", "", criterion
+            ).strip()
+            if criterion:
+                normalized.append(criterion)
+    if len(normalized) > 50:
+        raise ValueError("acceptance_criteria must contain at most 50 items")
+    return normalized
 
 
 class TaskCreateRequest(BaseModel):
@@ -21,7 +39,7 @@ class TaskCreateRequest(BaseModel):
     @field_validator("acceptance_criteria")
     @classmethod
     def validate_acceptance_criteria(cls, values: list[str]) -> list[str]:
-        normalized = [str(value).strip() for value in values]
+        normalized = _normalize_acceptance_criteria(values)
         if not normalized or any(not value for value in normalized):
             raise ValueError(
                 "acceptance_criteria must contain at least one non-empty string"
@@ -175,7 +193,7 @@ class PlanCreateRequest(BaseModel):
     @field_validator("acceptance_criteria")
     @classmethod
     def validate_optional_acceptance_criteria(cls, values: list[str]) -> list[str]:
-        normalized = [str(value).strip() for value in values]
+        normalized = _normalize_acceptance_criteria(values)
         if any(not value for value in normalized):
             raise ValueError("acceptance_criteria cannot contain blank strings")
         if any(len(value) > 4_000 for value in normalized):

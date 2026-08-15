@@ -20,6 +20,25 @@ describe("TaskForm", () => {
     });
   });
 
+  it("accepts newline-separated criteria without numbering", async () => {
+    const wrapper = mount(TaskForm);
+
+    await wrapper.get('[data-test="requirement"]').setValue("Add expense");
+    await wrapper.get('[data-test="criteria"]').setValue(
+      "Amount must be positive\nCategory is required\nSaving adds a record",
+    );
+    await wrapper.get('[data-test="task-form"]').trigger("submit");
+
+    expect(wrapper.emitted("submit")?.[0]?.[0]).toEqual({
+      requirement: "Add expense",
+      acceptance_criteria: [
+        "Amount must be positive",
+        "Category is required",
+        "Saving adds a record",
+      ],
+    });
+  });
+
   it("requires a concrete value in every field", async () => {
     const wrapper = mount(TaskForm);
 

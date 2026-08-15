@@ -74,13 +74,13 @@ function submit(): void {
     <fieldset class="criteria" :disabled="props.disabled">
       <legend>验收标准</legend>
       <p class="field-hint">
-        每行写一条可观察、可验证的结果。按回车会自动生成下一项编号，例如“传入 min_amount=100 时，只返回金额大于或等于 100 的交易”
+        每行写一条可观察、可验证的结果，编号可写可不写。按回车会自动生成下一项编号，两种格式都支持
       </p>
       <textarea
         v-model="criteriaText"
         data-test="criteria"
         rows="6"
-        placeholder="1. 传入 min_amount=100 时，只返回金额大于或等于 100 的交易"
+        placeholder="每行一条，可写编号：1. 传入 min_amount=100 时，只返回金额大于或等于 100 的交易"
         @keydown="handleCriteriaKeydown"
       />
     </fieldset>

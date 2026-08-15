@@ -541,16 +541,40 @@ class PlatformService:
 
     def _sync_notifications(self, context: ProjectContext) -> None:
         with self._notification_lock:
-            existing = self._read_notifications(context)
-            known = {str(item.get("notification_id")) for item in existing}
-            created: list[dict[str, Any]] = []
+            stored = self._read_notifications(context)
+            existing_by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+            existing: list[dict[str, Any]] = []
+            changed = False
+            for item in stored:
+                key = self._notification_key(item)
+                if key is None:
+                    existing.append(item)
+                    continue
+                previous = existing_by_key.get(key)
+                if previous is None:
+                    existing_by_key[key] = item
+                    existing.append(item)
+                    continue
+                changed = True
+                previous_created = str(previous.get("created_at", ""))
+                current_created = str(item.get("created_at", ""))
+                winner = item if current_created >= previous_created else previous
+                if previous.get("read_at") is None or item.get("read_at") is None:
+                    winner["read_at"] = None
+                existing_by_key[key] = winner
+                existing[existing.index(previous)] = winner
+
             for item in self._project_history(context):
                 category = self._notification_category(item)
                 if category is None:
                     continue
-                stable = f"{item.project_id}:{item.kind}:{item.identifier}:{category}:{item.updated_at}"
-                notification_id = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
-                if notification_id in known:
+                key = (item.project_id, item.kind, item.identifier, category)
+                notification_id = self._notification_id(key)
+                existing_item = existing_by_key.get(key)
+                if existing_item is not None:
+                    if existing_item.get("notification_id") != notification_id:
+                        existing_item["notification_id"] = notification_id
+                        changed = True
                     continue
                 notification = {
                     "notification_id": notification_id,
@@ -566,10 +590,24 @@ class PlatformService:
                 }
                 notification["delivery"] = self._deliver(notification)
                 existing.append(notification)
-                created.append(notification)
-                known.add(notification_id)
-            if created:
+                existing_by_key[key] = notification
+                changed = True
+            if changed:
                 self._write_notifications(context, existing)
+
+    @staticmethod
+    def _notification_key(
+        item: dict[str, Any],
+    ) -> tuple[str, str, str, str] | None:
+        values = tuple(str(item.get(field, "")) for field in (
+            "project_id", "kind", "identifier", "category"
+        ))
+        return values if all(values) else None
+
+    @staticmethod
+    def _notification_id(key: tuple[str, str, str, str]) -> str:
+        stable = ":".join(key)
+        return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
 
     @staticmethod
     def _notification_category(item: HistoryItem) -> str | None:

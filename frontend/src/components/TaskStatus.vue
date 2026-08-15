@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import CopyButton from "./CopyButton.vue";
 import {
@@ -10,6 +10,8 @@ import type { TaskData } from "../types/task";
 
 const props = defineProps<{ task: TaskData }>();
 const store = useOrchestrator();
+const now = ref(Date.now());
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 const labels: Record<TaskData["status"], string> = {
   accepted: "已接收",
@@ -68,14 +70,32 @@ const effectivePermissions = computed(() => {
 });
 const elapsed = computed(() => {
   const started = new Date(props.task.started_at).getTime();
-  const ended = new Date(
-    props.task.finished_at || props.task.updated_at || props.task.started_at,
-  ).getTime();
+  const liveStatuses: TaskData["status"][] = [
+    "accepted",
+    "running",
+    "pausing",
+    "cancelling",
+  ];
+  const ended = props.task.finished_at
+    ? new Date(props.task.finished_at).getTime()
+    : liveStatuses.includes(props.task.status)
+      ? now.value
+      : new Date(props.task.updated_at || props.task.started_at).getTime();
   if (!Number.isFinite(started) || !Number.isFinite(ended)) return "—";
   const seconds = Math.max(0, Math.round((ended - started) / 1000));
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes} 分 ${seconds % 60} 秒`;
+});
+
+onMounted(() => {
+  elapsedTimer = setInterval(() => {
+    now.value = Date.now();
+  }, 1_000);
+});
+
+onUnmounted(() => {
+  if (elapsedTimer !== null) clearInterval(elapsedTimer);
 });
 
 function formatTime(value: string | null): string {
