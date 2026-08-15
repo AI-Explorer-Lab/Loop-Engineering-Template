@@ -110,6 +110,31 @@ def append_created_project(config: Any, project: dict[str, Any]) -> None:
     _atomic_write_text(path, f"{content}\n")
 
 
+def remove_created_project(config: Any, project_id: str) -> dict[str, Any]:
+    """Remove one web-created project registration without touching its directory."""
+
+    normalized_id = str(project_id).strip()
+    path = project_store_path(config)
+    values = load_created_projects(config)
+    kept: list[dict[str, Any]] = []
+    removed: dict[str, Any] | None = None
+    for item in values:
+        if str(item.get("id", "")).strip() == normalized_id:
+            removed = dict(item)
+        else:
+            kept.append(item)
+    if removed is None:
+        raise KeyError(normalized_id)
+    content = json.dumps(
+        redact_sensitive_data(kept),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    _atomic_write_text(path, f"{content}\n")
+    return removed
+
+
 def default_project_validation() -> dict[str, Any]:
     """Validation suitable for a newly-created small Python project."""
 
@@ -201,6 +226,7 @@ def _unique_mappings(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 __all__ = [
     "append_created_project",
+    "remove_created_project",
     "default_project_validation",
     "PROJECT_TYPES",
     "VALIDATION_OPTIONS",

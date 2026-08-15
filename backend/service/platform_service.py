@@ -97,6 +97,10 @@ class PlatformService:
         )
         return self.project_data(context)
 
+    def delete_project(self, project_id: str) -> dict[str, str]:
+        self.registry.delete_project(project_id)
+        return {"project_id": project_id, "message": "项目配置已删除，项目目录未删除"}
+
     def history(
         self,
         *,

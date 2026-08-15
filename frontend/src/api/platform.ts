@@ -47,6 +47,13 @@ export function createProject(payload: {
   });
 }
 
+export function deleteProject(projectId: string): Promise<{ project_id: string; message: string }> {
+  return apiRequest<{ project_id: string; message: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function getCapabilities(): Promise<HarnessCapabilitiesData> {
   return apiRequest<HarnessCapabilitiesData>("/api/capabilities");
 }

@@ -32,6 +32,7 @@ import {
   getNotifications,
   getProjects,
   createProject as createProjectRequest,
+  deleteProject as deleteProjectRequest,
   markNotificationRead,
   updateNotificationSettings,
 } from "../api/platform";
@@ -637,6 +638,26 @@ export function createOrchestrator() {
     }
   }
 
+  async function deleteProject(projectId: string): Promise<boolean> {
+    pageError.value = "";
+    try {
+      await deleteProjectRequest(projectId);
+      const remaining = projects.value.filter((project) => project.project_id !== projectId);
+      projects.value = remaining;
+      if (activeProjectId.value === projectId) {
+        const next = remaining.find((project) => project.is_default) || remaining[0];
+        activeProjectId.value = next?.project_id || "";
+        writeStorage(PROJECT_STORAGE_KEY, activeProjectId.value);
+        resetRun();
+        if (next) await selectProject(next.project_id, false);
+      }
+      return true;
+    } catch (error) {
+      recordError(error, "项目配置删除失败；项目目录未删除。 ");
+      return false;
+    }
+  }
+
   async function initialize(): Promise<void> {
     initializing.value = true;
     try {
@@ -1080,6 +1101,7 @@ export function createOrchestrator() {
     activateRun,
     selectProject,
     createProject,
+    deleteProject,
     refreshCurrent,
     refreshEventsAndLogs,
     submitTask,

@@ -63,6 +63,16 @@ async def create_project(
     )
 
 
+@router.delete("/projects/{project_id}", response_model=ApiResponse[dict[str, str]])
+async def delete_project(project_id: str, request: Request) -> ApiResponse[dict[str, str]]:
+    return ApiResponse(
+        data=await run_in_threadpool(
+            _service(request).delete_project,
+            project_id,
+        )
+    )
+
+
 @router.get("/capabilities", response_model=ApiResponse[dict])
 async def capabilities(
     request: Request,

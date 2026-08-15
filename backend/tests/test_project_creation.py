@@ -141,3 +141,39 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
     stored = json.loads(registry_path.read_text(encoding="utf-8"))
     assert stored[0]["backend_architecture_enabled"] is True
     assert stored[0]["backend_architecture_knowledge_id"] == "TK-DEC-001"
+
+
+def test_delete_project_endpoint_removes_registration_but_keeps_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    target = tmp_path / "accounting"
+    registry_path = tmp_path / "projects.json"
+    config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        created = client.post(
+            "/api/projects",
+            json={
+                "name": "accounting",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
+        project_id = created.json()["data"]["project_id"]
+        deleted = client.delete(f"/api/projects/{project_id}")
+        projects = client.get("/api/projects")
+
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {
+        "project_id": project_id,
+        "message": "项目配置已删除，项目目录未删除",
+    }
+    assert target.is_dir()
+    assert project_id not in {item["project_id"] for item in projects.json()["data"]}
+    assert json.loads(registry_path.read_text(encoding="utf-8")) == []

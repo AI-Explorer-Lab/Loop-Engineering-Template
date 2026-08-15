@@ -78,6 +78,11 @@ async function create(): Promise<void> {
   showCreateForm.value = false;
   await router.push("/create");
 }
+
+async function remove(project: { project_id: string; name: string }): Promise<void> {
+  if (!window.confirm(`确定删除项目“${project.name}”的登记配置吗？项目目录不会删除。`)) return;
+  await store.deleteProject(project.project_id);
+}
 </script>
 
 <template>
@@ -111,8 +116,11 @@ async function create(): Promise<void> {
           后端架构：{{ project.backend_architecture_status === "completed" ? "已完成" : project.backend_architecture_status === "in_progress" ? "初始化中" : project.backend_architecture_status === "failed" ? "初始化失败" : "待首次开发" }}
         </div>
         <div class="project-runtime"><i :class="{ active: project.active_identifier }" /><span>{{ project.active_identifier ? `运行中 · ${project.active_identifier}` : "当前空闲" }}</span></div>
-        <button v-if="project.project_id !== store.activeProjectId.value" class="secondary-button" type="button" @click="select(project.project_id)">切换到此项目</button>
-        <span v-else class="selected-project-label">✓ 当前项目</span>
+        <div class="button-row">
+          <button v-if="project.project_id !== store.activeProjectId.value" class="secondary-button" type="button" @click="select(project.project_id)">切换到此项目</button>
+          <span v-else class="selected-project-label">✓ 当前项目</span>
+          <button v-if="!project.is_default" class="text-action danger-text" type="button" @click="remove(project)">删除配置</button>
+        </div>
       </article>
     </div>
     <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并按项目类型和勾选项保存验证配置；知识库默认启用，中期记忆默认读取。</p></section>

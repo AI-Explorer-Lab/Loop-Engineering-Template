@@ -19,6 +19,8 @@ from codex_loop.validation_profile import ValidationProfile
 from ..config.config import knowledge_from_settings, projects_from_settings
 from ..config.project_store import (
     append_created_project,
+    load_created_projects,
+    remove_created_project,
     validation_for_project,
 )
 from ..exceptions.business_exception import ProjectConfigurationError, ProjectNotFoundError
@@ -162,6 +164,24 @@ class ProjectRegistry:
         assert context is not None
         self._contexts[project_id] = context
         return context
+
+    def delete_project(self, project_id: str) -> None:
+        """Remove a web-created registration; never remove the repository itself."""
+
+        context = self.get(project_id)
+        if context.is_default:
+            raise ProjectConfigurationError("the default project cannot be deleted")
+        if context.task_service.executor.active_task_id() is not None:
+            raise ProjectConfigurationError("cannot delete a project with a running task")
+        registered = {
+            str(item.get("id", "")).strip()
+            for item in load_created_projects(self._config)
+        }
+        if context.project_id not in registered:
+            raise ProjectConfigurationError("only projects created from the web can be deleted")
+        remove_created_project(self._config, context.project_id)
+        context.task_service.close(wait=True)
+        self._contexts.pop(context.project_id, None)
 
     def _validate_knowledge_actor(self, actor: str) -> None:
         registry_path = str(self._knowledge.get("mcp_registry", "")).strip()
