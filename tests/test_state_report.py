@@ -106,10 +106,16 @@ class StateAndReportTests(unittest.TestCase):
         with patch("codex_loop.models.datetime") as mocked_datetime:
             mocked_datetime.now.return_value = fixed_time
             task_id = generate_task_id()
+            project_task_id = generate_task_id("accounting")
 
         task_timezone = mocked_datetime.now.call_args.args[0]
         self.assertEqual(task_timezone.utcoffset(None), timedelta(hours=8))
         self.assertRegex(task_id, r"^20260715-215622-[0-9a-f]{8}$")
+
+        self.assertRegex(
+            project_task_id,
+            r"^accounting-20260715-215622-[0-9a-f]{8}$",
+        )
 
     def test_persisted_timestamps_use_utc_plus_8_time(self) -> None:
         timestamp = datetime.fromisoformat(utc_now_iso())

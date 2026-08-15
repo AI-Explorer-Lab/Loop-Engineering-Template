@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
-from codex_loop.models import DeliveryStatus, QueueStatus, TaskSpec
+from codex_loop.models import DeliveryStatus, QueueStatus, TaskSpec, generate_task_id
 from codex_loop.queue_workflow import QueueWorkflow
 from codex_loop.review import ReviewError, ReviewService
 from codex_loop.git_delivery import DeliveryError, GitDeliveryService
@@ -38,6 +38,7 @@ class TaskService:
         self,
         repo_root: str | Path,
         *,
+        project_name: str | None = None,
         validation_timeout_seconds: float = 900.0,
         executor: TaskExecutor | None = None,
         mapper: FileRunMapper | None = None,
@@ -52,6 +53,7 @@ class TaskService:
         bootstrap_failed_callback: BootstrapCallback | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
+        self.project_name = project_name
         self.executor = executor or TaskExecutor()
         self.mapper = mapper or FileRunMapper(self.repo_root)
         self.workflow_factory = workflow_factory or (
@@ -85,6 +87,7 @@ class TaskService:
         rerun_of: str | None = None,
     ) -> TaskSnapshot:
         task = TaskSpec(
+            task_id=generate_task_id(self.project_name),
             requirement=requirement,
             acceptance_criteria=acceptance_criteria,
             rerun_of=rerun_of,
@@ -103,6 +106,8 @@ class TaskService:
     def start_spec(self, task: TaskSpec) -> TaskSnapshot:
         """Start one immutable TaskSpec produced by a confirmed Plan."""
 
+        if self.project_name and not task.task_id.startswith(f"{self.project_name.lower()}-"):
+            task.task_id = generate_task_id(self.project_name)
         with self._submission_lock:
             self._ensure_available()
             try:

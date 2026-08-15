@@ -32,6 +32,7 @@ import {
   getNotifications,
   getProjects,
   createProject as createProjectRequest,
+  deleteProject as deleteProjectRequest,
   markNotificationRead,
   updateNotificationSettings,
 } from "../api/platform";
@@ -396,6 +397,20 @@ export function createOrchestrator() {
     writeStorage(kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY, runIdentifier);
   }
 
+  function forgetRun(kind: RunKind, runIdentifier: string): void {
+    const projectId = activeProjectId.value || "default";
+    const stored = readStoredRuns();
+    if (stored[projectId]?.kind === kind && stored[projectId]?.identifier === runIdentifier) {
+      delete stored[projectId];
+      writeStorage(PROJECT_RUNS_STORAGE_KEY, JSON.stringify(stored));
+    }
+    const legacyKey = kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY;
+    if (readStorage(legacyKey) === runIdentifier) localStorage.removeItem(legacyKey);
+    if (readStorage(LAST_KIND_STORAGE_KEY) === (kind === "task" ? "single" : "queue")) {
+      localStorage.removeItem(LAST_KIND_STORAGE_KEY);
+    }
+  }
+
   async function refreshProjects(): Promise<void> {
     try {
       projects.value = await getProjects();
@@ -465,7 +480,7 @@ export function createOrchestrator() {
             : queue.value!.status,
         )
       ) return;
-      recordError(error, "事件或日志读取失败。");
+      recordError(error, "事件或日志读取失败");
     }
   }
 
@@ -533,7 +548,12 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
-      recordError(error, "任务状态读取失败。");
+      if (error instanceof ApiError && error.status === 404) {
+        forgetRun("task", taskId);
+        resetRun();
+        return;
+      }
+      recordError(error, "任务状态读取失败");
       if (currentKind.value === "task") schedulePoll();
     }
   }
@@ -573,7 +593,12 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
-      recordError(error, "长任务状态读取失败。");
+      if (error instanceof ApiError && error.status === 404) {
+        forgetRun("queue", queueId);
+        resetRun();
+        return;
+      }
+      recordError(error, "长任务状态读取失败");
       if (currentKind.value === "queue") schedulePoll();
     }
   }
@@ -620,17 +645,49 @@ export function createOrchestrator() {
   async function createProject(payload: {
     name: string;
     repo_path: string;
+    project_type: string;
+    validation_options: string[];
+    knowledge_actor_id: string;
     backend_architecture_enabled?: boolean;
   }): Promise<ProjectData | null> {
     pageError.value = "";
     try {
       const created = await createProjectRequest(payload);
       projects.value = [...projects.value, created];
-      await selectProject(created.project_id, false);
+      // Project creation is the critical path. Switch immediately after the
+      // POST succeeds; auxiliary status endpoints must not delay the UI.
+      activeProjectId.value = created.project_id;
+      writeStorage(PROJECT_STORAGE_KEY, created.project_id);
+      resetRun();
+      void Promise.all([
+        refreshNotificationSettings(),
+        refreshHarnessStatus(),
+        refreshProjects(),
+      ]);
       return created;
     } catch (error) {
-      recordError(error, "项目创建失败；尚未注册新项目。 ");
+      recordError(error, "项目创建失败；尚未注册新项目");
       return null;
+    }
+  }
+
+  async function deleteProject(projectId: string): Promise<boolean> {
+    pageError.value = "";
+    try {
+      await deleteProjectRequest(projectId);
+      const remaining = projects.value.filter((project) => project.project_id !== projectId);
+      projects.value = remaining;
+      if (activeProjectId.value === projectId) {
+        const next = remaining.find((project) => project.is_default) || remaining[0];
+        activeProjectId.value = next?.project_id || "";
+        writeStorage(PROJECT_STORAGE_KEY, activeProjectId.value);
+        resetRun();
+        if (next) await selectProject(next.project_id, false);
+      }
+      return true;
+    } catch (error) {
+      recordError(error, "项目配置删除失败；项目目录未删除");
+      return false;
     }
   }
 
@@ -652,7 +709,9 @@ export function createOrchestrator() {
       }
       await Promise.all([refreshNotificationSettings(), refreshHarnessStatus()]);
       let stored = selected ? readStoredRuns()[selected] : undefined;
-      if (!stored && selected) {
+      // Keep the old global task keys only for the legacy default project.
+      // A task from another project must never be restored into this project.
+      if (!stored && selected === "default") {
         const legacyKind = readStorage(LAST_KIND_STORAGE_KEY);
         const legacyIdentifier = readStorage(
           legacyKind === "queue" ? QUEUE_STORAGE_KEY : TASK_STORAGE_KEY,
@@ -664,10 +723,15 @@ export function createOrchestrator() {
           };
         }
       }
+      if (selected && selected !== "default") {
+        localStorage.removeItem(LAST_KIND_STORAGE_KEY);
+        localStorage.removeItem(TASK_STORAGE_KEY);
+        localStorage.removeItem(QUEUE_STORAGE_KEY);
+      }
       if (stored) await activateRun(stored.kind, stored.identifier);
       await refreshNotifications();
     } catch (error) {
-      recordError(error, "工作台初始化失败。");
+      recordError(error, "工作台初始化失败");
     } finally {
       initializing.value = false;
     }
@@ -680,7 +744,7 @@ export function createOrchestrator() {
       healthError.value = "";
     } catch (error) {
       health.value = null;
-      healthError.value = messageFrom(error, "后端服务不可用。");
+      healthError.value = messageFrom(error, "后端服务不可用");
     } finally {
       checkingHealth.value = false;
     }
@@ -706,7 +770,7 @@ export function createOrchestrator() {
     }
     harnessError.value = statusError === null
       ? ""
-      : messageFrom(statusError, "Harness 能力状态读取失败。");
+      : messageFrom(statusError, "Harness 能力状态读取失败");
   }
 
   async function generatePlan(payload: PlanCreatePayload): Promise<PlanDraft | null> {
@@ -717,7 +781,7 @@ export function createOrchestrator() {
       plan.value = await createPlan(payload);
       return plan.value;
     } catch (error) {
-      recordError(error, "自动规划草稿生成失败；尚未创建任务或工作区。");
+      recordError(error, "自动规划草稿生成失败；尚未创建任务或工作区");
       return null;
     } finally {
       planning.value = false;
@@ -741,7 +805,7 @@ export function createOrchestrator() {
       await activateRun(result.target_kind, targetId);
       return true;
     } catch (error) {
-      recordError(error, "Plan 确认失败；未启动新的执行。草稿仍可继续修改。");
+      recordError(error, "Plan 确认失败；未启动新的执行。草稿仍可继续修改");
       return false;
     } finally {
       confirmingPlan.value = false;
@@ -761,7 +825,7 @@ export function createOrchestrator() {
       connectEventStream();
       return accepted;
     } catch (error) {
-      recordError(error, "任务提交失败。");
+      recordError(error, "任务提交失败");
       return null;
     } finally {
       submitting.value = false;
@@ -781,7 +845,7 @@ export function createOrchestrator() {
       connectEventStream();
       return accepted;
     } catch (error) {
-      recordError(error, "长任务提交失败。");
+      recordError(error, "长任务提交失败");
       return null;
     } finally {
       submitting.value = false;
@@ -826,7 +890,7 @@ export function createOrchestrator() {
       }
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "运行控制失败。");
+      recordError(error, "运行控制失败");
     } finally {
       controlling.value = false;
     }
@@ -860,7 +924,7 @@ export function createOrchestrator() {
       await refreshNotifications();
       return true;
     } catch (error) {
-      recordError(error, "审查提交失败。");
+      recordError(error, "审查提交失败");
       return false;
     } finally {
       reviewing.value = false;
@@ -887,7 +951,7 @@ export function createOrchestrator() {
         else clearPollTimer();
       }
     } catch (error) {
-      recordError(error, kind === "commit" ? "Commit 重试失败。" : "知识归档重试失败。");
+      recordError(error, kind === "commit" ? "Commit 重试失败" : "知识归档重试失败");
     } finally {
       controlling.value = false;
     }
@@ -906,7 +970,7 @@ export function createOrchestrator() {
       await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       return true;
     } catch (error) {
-      recordError(error, "GitHub 发布失败。");
+      recordError(error, "GitHub 发布失败");
       return false;
     } finally {
       controlling.value = false;
@@ -924,7 +988,7 @@ export function createOrchestrator() {
       );
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "跳过子任务失败。");
+      recordError(error, "跳过子任务失败");
     } finally {
       controlling.value = false;
     }
@@ -949,7 +1013,7 @@ export function createOrchestrator() {
       );
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "调整子任务顺序失败。");
+      recordError(error, "调整子任务顺序失败");
     } finally {
       controlling.value = false;
     }
@@ -961,7 +1025,7 @@ export function createOrchestrator() {
     try {
       logContent.value = await getLog(currentKind.value, identifier.value, logId);
     } catch (error) {
-      recordError(error, "日志正文读取失败。");
+      recordError(error, "日志正文读取失败");
     }
   }
 
@@ -1005,7 +1069,7 @@ export function createOrchestrator() {
       });
       return true;
     } catch (error) {
-      recordError(error, "通知偏好保存失败。");
+      recordError(error, "通知偏好保存失败");
       return false;
     }
   }
@@ -1077,6 +1141,7 @@ export function createOrchestrator() {
     activateRun,
     selectProject,
     createProject,
+    deleteProject,
     refreshCurrent,
     refreshEventsAndLogs,
     submitTask,

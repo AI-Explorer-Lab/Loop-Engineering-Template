@@ -65,19 +65,19 @@ async function submit(payload: { decision: ReviewDecision; reviewer: string; com
 <template>
   <div class="view-stack review-view">
     <header class="view-header">
-      <div><span class="section-kicker">最终人工关口</span><h1>审核</h1><p>批准会绑定当前可见 Diff 和 commit subject，在任务分支创建一次 commit；不会 merge 或 push。</p></div>
+      <div><span class="section-kicker">最终人工关口</span><h1>审核</h1><p>批准会绑定当前可见 Diff 和 commit subject，在任务分支创建一次 commit；不会 merge 或 push</p></div>
       <span class="safety-statement"><i>✓</i> 本地不可变记录</span>
     </header>
 
     <div v-if="!store.task.value" class="surface empty-state large-empty">
-      <h2>没有可审核的任务</h2><p>先从历史记录打开任务，或等待当前运行产出机器结果。</p>
+      <h2>没有可审核的任务</h2><p>先从历史记录打开任务，或等待当前运行产出机器结果</p>
       <RouterLink class="secondary-button link-button" to="/history">查看历史</RouterLink>
     </div>
     <div v-else-if="store.task.value.legacy" class="surface empty-state large-empty">
-      <h2>这是一条旧版记录</h2><p>{{ store.task.value.history_warning || "历史数据缺少 Diff 指纹与审核结构，不能补造审核结论。" }}</p>
+      <h2>这是一条旧版记录</h2><p>{{ store.task.value.history_warning || "历史数据缺少 Diff 指纹与审核结构，不能补造审核结论" }}</p>
     </div>
     <div v-else-if="!reviewable" class="surface empty-state large-empty">
-      <h2>机器流程尚未到达审核点</h2><p>当前状态为 {{ store.task.value.status }}，可以返回监控页继续观察。</p>
+      <h2>机器流程尚未到达审核点</h2><p>当前状态为 {{ store.task.value.status }}，可以返回监控页继续观察</p>
       <RouterLink class="secondary-button link-button" to="/monitor">返回监控</RouterLink>
     </div>
 
@@ -108,7 +108,7 @@ async function submit(payload: { decision: ReviewDecision; reviewer: string; com
               <p>{{ warning.message || warning.rationale || warning.knowledge_id || "需要人工复核" }}</p>
             </article>
           </div>
-          <p v-else-if="!Object.keys(aggregate).length" class="capability-empty">该历史记录不具备分层评估产物。</p>
+          <p v-else-if="!Object.keys(aggregate).length" class="capability-empty">该历史记录不具备分层评估产物</p>
         </section>
         <section class="knowledge-block" data-test="knowledge-summary">
           <div class="subsection-heading"><div><span class="section-kicker">冻结依据</span><h3>知识与成熟度</h3></div><span>{{ knowledgeItems.length }} 条</span></div>
@@ -118,9 +118,9 @@ async function submit(payload: { decision: ReviewDecision; reviewer: string; com
               <p>{{ item.type }} · {{ item.maturity }} · revision {{ item.revision }} · {{ item.path }}</p>
             </article>
           </div>
-          <p v-else class="capability-empty">没有注入适用知识；无依据的架构层应显示 not_evaluated。</p>
+          <p v-else class="capability-empty">没有注入适用知识；无依据的架构层应显示 not_evaluated</p>
         </section>
-        <pre class="review-report-content">{{ visibleReport || "汇总报告尚未生成。" }}</pre>
+        <pre class="review-report-content">{{ visibleReport || "汇总报告尚未生成" }}</pre>
       </section>
       <ReviewPanel
         :task="store.task.value"

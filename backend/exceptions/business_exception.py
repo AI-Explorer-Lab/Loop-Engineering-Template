@@ -94,3 +94,8 @@ class ProjectNotFoundError(BusinessException):
             code=ErrorCode.PROJECT_NOT_FOUND,
             status_code=404,
         )
+
+
+class ProjectConfigurationError(BusinessException):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code=ErrorCode.BUSINESS_ERROR, status_code=400)

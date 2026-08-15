@@ -6,9 +6,9 @@ from typing import Any, Callable, Mapping
 
 from codex_loop.queue_workflow import QueueWorkflow
 from codex_loop.models import (
-    QueueStatus,
-    QueueTaskStatus,
-    generate_queue_id,
+        QueueStatus,
+        QueueTaskStatus,
+        generate_queue_id,
     utc_now_iso,
     TaskQueueSpec,
 )
@@ -35,12 +35,14 @@ class QueueService:
         self,
         repo_root: str | Path,
         *,
+        project_name: str | None = None,
         validation_timeout_seconds: float = 900.0,
         executor: TaskExecutor | None = None,
         mapper: FileQueueMapper | None = None,
         workflow_factory: QueueWorkflowFactory | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
+        self.project_name = project_name
         self.executor = executor or TaskExecutor()
         self.mapper = mapper or FileQueueMapper(self.repo_root)
         self.store = self.mapper.store
@@ -62,7 +64,7 @@ class QueueService:
         with self._submission_lock:
             self._ensure_available()
             workflow = self.workflow_factory()
-            queue_id = generate_queue_id()
+            queue_id = generate_queue_id(self.project_name)
             try:
                 state, _ = self.executor.prepare_and_submit(
                     queue_id,
@@ -84,6 +86,8 @@ class QueueService:
     def start_spec(self, spec: TaskQueueSpec) -> QueueSnapshot:
         """Start one immutable queue produced by a confirmed Plan."""
 
+        if self.project_name and not spec.queue_id.startswith(f"{self.project_name.lower()}-"):
+            spec.queue_id = generate_queue_id(self.project_name)
         with self._submission_lock:
             self._ensure_available()
             workflow = self.workflow_factory()

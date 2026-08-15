@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import create_app
 from backend.service.project_registry import ProjectRegistry
+from backend.service.project_environment import ProjectEnvironment
 
 
 def _config(control_root: Path, registry_path: Path) -> dict[str, object]:
@@ -30,19 +31,42 @@ def _config(control_root: Path, registry_path: Path) -> dict[str, object]:
     }
 
 
+def _stub_environment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.service.project_registry.prepare_project_environment",
+        lambda *_args, **kwargs: ProjectEnvironment(
+            conda_env_name=(
+                "loop-project-" + str(kwargs["project_name"]).lower()
+                if "python_tests" in kwargs["validation_options"]
+                else None
+            ),
+            frontend_install_command=None,
+        ),
+    )
+
+
 def test_new_project_endpoint_creates_git_project_and_persists_registration(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     control_root = tmp_path / "control"
     control_root.mkdir()
     target = tmp_path / "read-notes"
     registry_path = tmp_path / "projects.json"
     config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
 
     with TestClient(create_app(config=config, validate_config=False)) as client:
         response = client.post(
             "/api/projects",
-            json={"name": "Reading Notes", "repo_path": str(target)},
+            json={
+                "name": "ReadingNotes",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
         )
         projects = client.get("/api/projects")
 
@@ -60,11 +84,13 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         "schema_version": 1,
         "kind": "codex-harness-project",
         "project_id": "read-notes",
-        "project_name": "Reading Notes",
+        "project_name": "ReadingNotes",
         "state_root": ".codex-orchestrator",
         "secure_runtime_root": ".codex-runtime",
     }
     assert (target / ".git").is_dir()
+    assert (target / "tests" / "__init__.py").is_file()
+    assert (target / "tests" / "test_smoke.py").is_file()
     assert subprocess.run(
         ["git", "-C", str(target), "branch", "--show-current"],
         capture_output=True,
@@ -78,6 +104,7 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         check=True,
     ).stdout.splitlines()
     assert ".harness/project.json" in tracked
+    assert "tests/test_smoke.py" in tracked
     assert "read-notes" in {item["project_id"] for item in projects.json()["data"]}
 
     restarted = ProjectRegistry(config)
@@ -90,6 +117,7 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
 
 def test_new_project_persists_one_time_backend_architecture_configuration(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     control_root = tmp_path / "control"
     control_root.mkdir()
@@ -106,13 +134,18 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
             "knowledge_writer_actor_id": "orchestrator",
         },
     }
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
 
     with TestClient(create_app(config=config, validate_config=False)) as client:
         response = client.post(
             "/api/projects",
             json={
-                "name": "Daily Journal",
+                "name": "DailyJournal",
                 "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
                 "backend_architecture_enabled": True,
             },
         )
@@ -125,3 +158,95 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
     stored = json.loads(registry_path.read_text(encoding="utf-8"))
     assert stored[0]["backend_architecture_enabled"] is True
     assert stored[0]["backend_architecture_knowledge_id"] == "TK-DEC-001"
+
+
+def test_delete_project_endpoint_removes_registration_but_keeps_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    target = tmp_path / "accounting"
+    registry_path = tmp_path / "projects.json"
+    config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        created = client.post(
+            "/api/projects",
+            json={
+                "name": "accounting",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
+        project_id = created.json()["data"]["project_id"]
+        deleted = client.delete(f"/api/projects/{project_id}")
+        projects = client.get("/api/projects")
+
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {
+        "project_id": project_id,
+        "message": "项目配置已删除，项目目录未删除",
+    }
+    assert target.is_dir()
+    assert project_id not in {item["project_id"] for item in projects.json()["data"]}
+    assert json.loads(registry_path.read_text(encoding="utf-8")) == []
+
+
+def test_new_project_rejects_names_that_cannot_bind_to_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    config = _config(control_root, tmp_path / "projects.json")
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "财务 account",
+                "repo_path": str(tmp_path / "account"),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "ASCII 字母、数字和连字符" in str(response.json())
+
+
+def test_new_project_accepts_hyphenated_name_and_binds_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    target = tmp_path / "accounting-app"
+    registry_path = tmp_path / "projects.json"
+    config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "accounting-app",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["name"] == "accounting-app"
+    assert response.json()["data"]["conda_env_name"] == "loop-project-accounting-app"

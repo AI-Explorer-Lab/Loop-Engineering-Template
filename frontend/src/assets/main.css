@@ -173,6 +173,19 @@ code, pre { font-family: var(--mono); }
 .project-form-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 0.71rem; font-weight: 700; }
 .project-form-grid input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #d7dde6; border-radius: 7px; outline: 0; background: #fff; color: var(--text); }
 .project-form-grid input:focus { border-color: #6b93ee; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.09); }
+.project-form-grid select { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #d7dde6; border-radius: 7px; outline: 0; background: #fff; color: var(--text); }
+.project-form-grid select:focus { border-color: #6b93ee; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.09); }
+.project-form-grid > label { align-self: start; align-content: start; }
+.validation-options { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 16px 20px 15px; border: 1px solid #dfe4eb; border-radius: 8px; }
+.validation-options legend { padding: 0 5px; color: #3d495b; font-size: 0.74rem; font-weight: 720; }
+.checkbox-row { display: grid !important; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 10px; margin: 0; color: #56647a !important; font-size: 0.72rem !important; font-weight: 650 !important; }
+.checkbox-row input[type="checkbox"] { appearance: none; display: grid; box-sizing: border-box; width: 16px !important; height: 16px !important; min-width: 16px; min-height: 16px; margin: 0; padding: 0 !important; place-content: center; border: 1px solid #b8c1ce; border-radius: 3px; background: #fff; }
+.checkbox-row input[type="checkbox"]::after { width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; content: ""; transform: rotate(45deg) scale(0); transition: transform 100ms ease; }
+.checkbox-row input[type="checkbox"]:checked { border-color: #557bd5; background: #557bd5; }
+.checkbox-row input[type="checkbox"]:checked::after { transform: rotate(45deg) scale(1); }
+.checkbox-row input[type="checkbox"]:disabled { opacity: 0.72; }
+.checkbox-row span { display: flex; min-width: 0; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.checkbox-row small { color: #8993a1; font-size: 0.66rem; font-weight: 500; }
 .local-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 99px; background: var(--green-soft); color: var(--green); font-size: 0.67rem; font-weight: 700; }
 .local-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .segmented-control { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 3px 0 25px; padding: 4px; border-radius: 8px; background: #f0f2f5; }
@@ -463,6 +476,7 @@ code, pre { font-family: var(--mono); }
 .project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
 .project-create-form { max-width: 760px; padding: 24px 26px 26px; }
 .project-create-form .task-form { grid-template-columns: 1fr 1fr; }
+.project-create-form .task-form > label { align-self: start; align-content: start; }
 .project-create-form .task-form > .field-hint, .project-create-form .task-form > .form-error, .project-create-form .button-row { grid-column: 1 / -1; }
 .project-architecture-toggle { grid-column: 1 / -1; display: flex !important; grid-template-columns: auto 1fr; align-items: start; gap: 10px; padding: 12px; border: 1px solid #e4e8ef; border-radius: 8px; background: #fafbfc; }
 .project-architecture-toggle input { width: 16px; height: 16px; margin-top: 2px; }

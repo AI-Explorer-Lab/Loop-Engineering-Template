@@ -164,6 +164,32 @@ def test_projects_history_events_logs_and_notifications_share_persisted_state(
     assert metrics.json()["data"]["completed_tasks"] == 1
 
 
+def test_notifications_dedupe_same_task_and_category_after_updated_at_changes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "accounting"
+    repo_root.mkdir()
+    task = _persist_completed_task(repo_root)
+    app = create_app(config=_config(repo_root), validate_config=False)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        first = client.get(
+            "/api/notifications",
+            params={"project_id": "accounting"},
+        ).json()["data"]
+        state = StateStore(repo_root).load_state(task.task_id)
+        state.updated_at = "2026-08-15T12:00:00+08:00"
+        StateStore(repo_root).save_state(state)
+        second = client.get(
+            "/api/notifications",
+            params={"project_id": "accounting"},
+        ).json()["data"]
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert second[0]["notification_id"] == first[0]["notification_id"]
+
+
 def test_invalid_event_history_is_reported_without_streaming_partial_facts(
     tmp_path: Path,
 ) -> None:

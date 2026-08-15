@@ -36,12 +36,22 @@ export function getProjects(): Promise<ProjectData[]> {
 export function createProject(payload: {
   name: string;
   repo_path: string;
+  project_type: string;
+  validation_options: string[];
+  knowledge_actor_id: string;
   backend_architecture_enabled?: boolean;
 }): Promise<ProjectData> {
   return apiRequest<ProjectData>("/api/projects", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function deleteProject(projectId: string): Promise<{ project_id: string; message: string }> {
+  return apiRequest<{ project_id: string; message: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function getCapabilities(): Promise<HarnessCapabilitiesData> {

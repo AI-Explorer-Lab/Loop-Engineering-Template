@@ -23,18 +23,29 @@ def utc_now_iso() -> str:
     return datetime.now(PROJECT_TIMEZONE).isoformat(timespec="milliseconds")
 
 
-def generate_task_id() -> str:
+def _project_id_prefix(project_name: str | None) -> str:
+    if not project_name:
+        return ""
+    value = re.sub(r"[^A-Za-z0-9]+", "-", str(project_name).strip()).strip("-").lower()
+    return value
+
+
+def generate_task_id(project_name: str | None = None) -> str:
     """Generate a UTC+8 task id that is also safe as a directory name."""
 
     timestamp = datetime.now(PROJECT_TIMEZONE).strftime("%Y%m%d-%H%M%S")
-    return f"{timestamp}-{uuid4().hex[:8]}"
+    suffix = f"{timestamp}-{uuid4().hex[:8]}"
+    prefix = _project_id_prefix(project_name)
+    return f"{prefix}-{suffix}" if prefix else suffix
 
 
-def generate_queue_id() -> str:
+def generate_queue_id(project_name: str | None = None) -> str:
     """Generate a stable identifier for one ordered multi-task queue."""
 
     timestamp = datetime.now(PROJECT_TIMEZONE).strftime("%Y%m%d-%H%M%S")
-    return f"queue-{timestamp}-{uuid4().hex[:8]}"
+    suffix = f"queue-{timestamp}-{uuid4().hex[:8]}"
+    prefix = _project_id_prefix(project_name)
+    return f"{prefix}-{suffix}" if prefix else suffix
 
 
 class InfrastructureError(RuntimeError):

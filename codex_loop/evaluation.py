@@ -17,7 +17,7 @@ from .validation_evidence import ValidationEvidenceSnapshot
 
 
 EvaluationStatus = Literal[
-    "pass", "fail", "needs_human", "not_applicable", "not_evaluated"
+    "pass", "fail", "repairable", "needs_human", "not_applicable", "not_evaluated"
 ]
 
 
@@ -46,6 +46,7 @@ class SpecCriterionResult(BaseModel):
     acceptance_id: str = Field(pattern=r"^AC-[0-9]{3}$")
     status: EvaluationStatus
     rationale: str = Field(min_length=1, max_length=8000)
+    repair_actions: list[str] = Field(default_factory=list, max_length=20)
     validation_evidence_ids: list[
         Annotated[str, Field(pattern=r"^VAL-[0-9]{3}$", max_length=7)]
     ] = Field(
@@ -71,6 +72,7 @@ class ArchitectureFinding(BaseModel):
     finding_id: str = Field(min_length=1, max_length=100)
     status: EvaluationStatus
     rationale: str = Field(min_length=1, max_length=8000)
+    repair_actions: list[str] = Field(default_factory=list, max_length=20)
     changed_location: str = Field(
         default="",
         max_length=1000,
@@ -95,7 +97,7 @@ class ArchitectureEvaluationOutput(BaseModel):
             raise ValueError(
                 "not_evaluated architecture output cannot contain findings"
             )
-        if self.status in {"fail", "needs_human"} and not self.findings:
+        if self.status in {"fail", "repairable", "needs_human"} and not self.findings:
             raise ValueError(
                 "failing or human-required architecture output needs a finding"
             )
@@ -107,6 +109,12 @@ class ArchitectureEvaluationOutput(BaseModel):
             item.status == "fail" for item in self.findings
         ):
             raise ValueError("failing architecture output requires a failing finding")
+        if self.status == "repairable" and not any(
+            item.status == "repairable" for item in self.findings
+        ):
+            raise ValueError(
+                "repairable architecture output requires a repairable finding"
+            )
         if self.status == "needs_human" and not any(
             item.status == "needs_human" for item in self.findings
         ):
@@ -335,6 +343,10 @@ class EvaluationCoordinator:
                 raise InfrastructureError(
                     "passing or failing specification results require cited evidence"
                 )
+            if criterion.status == "repairable" and not criterion.repair_actions:
+                raise InfrastructureError(
+                    "repairable specification result needs concrete repair_actions"
+                )
             if (
                 criterion.status == "fail"
                 and validation_ids
@@ -380,6 +392,10 @@ class EvaluationCoordinator:
             str(item.get("path", "")) for item in changed_files if item.get("path")
         }
         for finding in output.findings:
+            if finding.status == "repairable" and not finding.repair_actions:
+                raise InfrastructureError(
+                    "repairable architecture finding needs concrete repair_actions"
+                )
             location_path = finding.changed_location.split(":", 1)[0]
             if location_path not in known_paths:
                 raise InfrastructureError(
@@ -494,6 +510,8 @@ class EvaluationCoordinator:
             value = criterion.model_dump(mode="json")
             if criterion.status == "fail":
                 blocking.append({"layer": "specification", **value})
+            elif criterion.status == "repairable":
+                blocking.append({"layer": "specification", **value})
             elif criterion.status in {"needs_human", "not_evaluated"}:
                 requires_human = True
                 warnings.append({"layer": "specification", **value})
@@ -505,6 +523,12 @@ class EvaluationCoordinator:
             value = finding.model_dump(mode="json")
             if (
                 finding.status == "fail"
+                and item.constraint_strength == "strong"
+                and bool(finding.changed_location.strip())
+            ):
+                blocking.append({"layer": "architecture", **value})
+            elif (
+                finding.status == "repairable"
                 and item.constraint_strength == "strong"
                 and bool(finding.changed_location.strip())
             ):

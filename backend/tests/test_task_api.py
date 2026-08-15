@@ -149,6 +149,26 @@ def test_health_and_create_task() -> None:
     assert service.created == ("Add filtering", ["Filtering works"])
 
 
+def test_create_task_accepts_newline_separated_criteria_in_one_payload_item() -> None:
+    service = FakeTaskService()
+    with _client(service) as client:
+        created = client.post(
+            "/api/tasks",
+            json={
+                "requirement": "Add expense",
+                "acceptance_criteria": [
+                    "Amount must be positive\nCategory is required\n3. Saving adds a record"
+                ],
+            },
+        )
+
+    assert created.status_code == 202
+    assert service.created == (
+        "Add expense",
+        ["Amount must be positive", "Category is required", "Saving adds a record"],
+    )
+
+
 def test_invalid_payload_is_422_without_echoing_details() -> None:
     with _client(FakeTaskService()) as client:
         response = client.post(

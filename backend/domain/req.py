@@ -1,7 +1,27 @@
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Any
+
+from ..service.project_environment import validate_project_name as validate_project_name_value
+
+
+def _normalize_acceptance_criteria(values: list[str]) -> list[str]:
+    """Accept either one item per list entry or newline-separated text."""
+
+    normalized: list[str] = []
+    for value in values:
+        for line in str(value).splitlines():
+            criterion = line.strip()
+            criterion = re.sub(
+                r"^(?:\d+[.)、]\s*|[-*+]\s+)", "", criterion
+            ).strip()
+            if criterion:
+                normalized.append(criterion)
+    if len(normalized) > 50:
+        raise ValueError("acceptance_criteria must contain at most 50 items")
+    return normalized
 
 
 class TaskCreateRequest(BaseModel):
@@ -19,7 +39,7 @@ class TaskCreateRequest(BaseModel):
     @field_validator("acceptance_criteria")
     @classmethod
     def validate_acceptance_criteria(cls, values: list[str]) -> list[str]:
-        normalized = [str(value).strip() for value in values]
+        normalized = _normalize_acceptance_criteria(values)
         if not normalized or any(not value for value in normalized):
             raise ValueError(
                 "acceptance_criteria must contain at least one non-empty string"
@@ -111,6 +131,9 @@ class NotificationSettingsRequest(BaseModel):
 class ProjectCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     repo_path: str = Field(min_length=1, max_length=2_000)
+    project_type: str = Field(default="python", min_length=1, max_length=30)
+    validation_options: list[str] = Field(default_factory=list, max_length=10)
+    knowledge_actor_id: str = Field(min_length=1, max_length=100)
     backend_architecture_enabled: bool = False
 
     @field_validator("name", "repo_path")
@@ -119,6 +142,29 @@ class ProjectCreateRequest(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("project value cannot be blank")
+        return normalized
+
+    @field_validator("name")
+    @classmethod
+    def validate_project_name(cls, value: str) -> str:
+        return validate_project_name_value(value)
+
+    @field_validator("project_type", "knowledge_actor_id")
+    @classmethod
+    def normalize_project_option(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("project option cannot be blank")
+        return normalized
+
+    @field_validator("validation_options")
+    @classmethod
+    def normalize_validation_options(cls, values: list[str]) -> list[str]:
+        normalized = [str(value).strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("validation options cannot be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("validation options must be unique")
         return normalized
 
 
@@ -147,7 +193,7 @@ class PlanCreateRequest(BaseModel):
     @field_validator("acceptance_criteria")
     @classmethod
     def validate_optional_acceptance_criteria(cls, values: list[str]) -> list[str]:
-        normalized = [str(value).strip() for value in values]
+        normalized = _normalize_acceptance_criteria(values)
         if any(not value for value in normalized):
             raise ValueError("acceptance_criteria cannot contain blank strings")
         if any(len(value) > 4_000 for value in normalized):

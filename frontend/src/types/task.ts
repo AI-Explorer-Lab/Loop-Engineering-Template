@@ -61,11 +61,12 @@ export interface PlanDraft {
   source_requirement_sha256: string;
   context_sha256: string;
   acceptance_criteria: Record<string, string>;
-  status: "ready" | "manual_input_required";
+  status: "ready" | "manual_input_required" | "needs_clarification";
   execution_mode: "single" | "queue";
   subtasks: PlannedSubtask[];
   unassigned_acceptance_ids: string[];
   warnings: string[];
+  clarification_questions: string[];
   planner_thread_id: string;
   created_at: string;
 }
@@ -213,6 +214,11 @@ export interface ProjectData {
   is_default: boolean;
   active_identifier: string | null;
   knowledge_actor_id: string;
+  knowledge_enabled?: boolean;
+  memory_enabled?: boolean;
+  project_type?: string;
+  validation_options?: string[];
+  conda_env_name?: string | null;
   publish_enabled?: boolean;
   publish_auto_create_remote?: boolean;
   publish_remote_name?: string;

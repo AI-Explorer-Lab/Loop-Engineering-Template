@@ -22,7 +22,7 @@ async function load(page = 1): Promise<void> {
   try {
     result.value = await getHistory({ project_id: projectId.value, query: query.value, kind: kind.value, status: status.value, page, page_size: 20 });
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "历史记录读取失败。";
+    error.value = caught instanceof Error ? caught.message : "历史记录读取失败";
   } finally {
     loading.value = false;
   }
@@ -44,7 +44,7 @@ onMounted(() => void load());
 
 <template>
   <div class="view-stack history-view">
-    <header class="view-header"><div><span class="section-kicker">跨项目运行档案</span><h1>历史</h1><p>搜索任务与长队列，切换项目后继续查看完整记录。</p></div></header>
+    <header class="view-header"><div><span class="section-kicker">跨项目运行档案</span><h1>历史</h1><p>搜索任务与长队列，切换项目后继续查看完整记录</p></div></header>
     <section class="surface history-surface">
       <form class="filter-bar" @submit.prevent="load(1)">
         <label class="search-field"><span>⌕</span><input v-model="query" placeholder="搜索标题或任务编号" /></label>
@@ -65,7 +65,7 @@ onMounted(() => void load());
           <span class="row-chevron">›</span>
         </button>
       </div>
-      <div v-else-if="!loading" class="empty-inline">没有符合条件的运行记录。</div>
+      <div v-else-if="!loading" class="empty-inline">没有符合条件的运行记录</div>
       <nav v-if="result.pages > 1" class="pagination">
         <button class="secondary-button" type="button" :disabled="result.page <= 1" @click="load(result.page - 1)">上一页</button>
         <span>{{ result.page }} / {{ result.pages }}</span>

@@ -37,6 +37,7 @@ class HarnessRuntime:
         validation_timeout_seconds: float = 900.0,
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
         backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
+        include_memory: bool = True,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.project_id = str(project_id)
@@ -50,6 +51,7 @@ class HarnessRuntime:
             else ValidationProfile.from_mapping(validation_profile)
         )
         self.backend_architecture_bootstrap = backend_architecture_bootstrap
+        self.include_memory = bool(include_memory)
         self._registry: dict[str, Any] | None = None
 
     def context_assembler(self) -> ContextAssembler:
@@ -86,6 +88,7 @@ class HarnessRuntime:
             knowledge_actor_id=self.knowledge_actor_id,
             validation_profile=self.validation_profile,
             backend_architecture_bootstrap=self.backend_architecture_bootstrap,
+            include_memory=self.include_memory,
         )
 
     def queue_workflow(self) -> QueueWorkflow:
@@ -145,7 +148,7 @@ class HarnessRuntime:
             stage="planner",
             query=query,
             actor=self.knowledge_actor_id,
-            include_memory=True,
+            include_memory=self.include_memory,
             exclude_knowledge_ids=excluded,
         )
 
@@ -171,6 +174,7 @@ class HarnessRuntime:
             stage="archive",
             query=" ".join([task.requirement, *task.acceptance_criteria]),
             actor=self.knowledge_actor_id,
+            include_memory=self.include_memory,
             changed_paths=[
                 str(item.get("path"))
                 for item in self._optional_json(

@@ -194,6 +194,12 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
 
     policy.prepare_runtime()
     policy.stage_app_server_executable("/usr/bin/true")
+    try:
+        app_server_prefix = policy.app_server_command_prefix()
+    except InfrastructureError as exc:
+        if "cannot run in the current host runtime" in str(exc):
+            pytest.skip(str(exc))
+        raise
 
     copied_auth = policy.codex_home_dir / "auth.json"
     assert copied_auth.is_file()
@@ -228,7 +234,7 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
         blocked_target = repository / "app-server-outside.txt"
         blocked = subprocess.run(
             [
-                *policy.app_server_command_prefix(),
+                *app_server_prefix,
                 "/bin/zsh",
                 "-lc",
                 f"printf blocked > {blocked_target}",
@@ -245,7 +251,7 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
         allowed_target = info.worktree / "app-server-inside.txt"
         allowed = subprocess.run(
             [
-                *policy.app_server_command_prefix(),
+                *app_server_prefix,
                 "/bin/zsh",
                 "-lc",
                 f"printf allowed > {allowed_target}",
@@ -262,7 +268,7 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
 
         blocked_auth = subprocess.run(
             [
-                *policy.app_server_command_prefix(),
+                *app_server_prefix,
                 "/usr/bin/head",
                 "-c",
                 "1",
@@ -278,7 +284,7 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
 
         blocked_network = subprocess.run(
             [
-                *policy.app_server_command_prefix(),
+                *app_server_prefix,
                 "/usr/bin/curl",
                 "-I",
                 "--max-time",
@@ -295,7 +301,7 @@ def test_policy_runtime_copies_only_login_material_into_task_home(
 
         blocked_production = subprocess.run(
             [
-                *policy.app_server_command_prefix(),
+                *app_server_prefix,
                 str(runtime_bin / "kubectl"),
             ],
             cwd=info.worktree,
@@ -384,7 +390,12 @@ def test_policy_allows_only_package_manifests_needed_by_shared_node_dependencies
     assert f'(allow file-read* (subpath "{repository.parent}"))' not in app_server_profile
 
     if Path("/usr/bin/sandbox-exec").is_file():
-        policy.validation_command_prefix()
+        try:
+            policy.validation_command_prefix()
+        except InfrastructureError as exc:
+            if "cannot run in the current host runtime" in str(exc):
+                pytest.skip(str(exc))
+            raise
         validation_profile = (policy.runtime_root / "validation.sb").read_text(
             encoding="utf-8"
         )

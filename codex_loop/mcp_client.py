@@ -25,6 +25,7 @@ DEFAULT_MCP_REGISTRY = Path(
 MODE_TOOLS = {
     "read": {
         "knowledge_catalog",
+        "knowledge_actor_validate",
         "knowledge_search",
         "knowledge_read",
         "skill_list",

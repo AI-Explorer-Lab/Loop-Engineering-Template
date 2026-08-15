@@ -131,7 +131,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
                 <small>{{ text(item.path, "未提供来源路径") }}</small>
               </article>
             </div>
-            <p v-else class="checkpoint-detail-empty">没有注入适用知识。</p>
+            <p v-else class="checkpoint-detail-empty">没有注入适用知识</p>
           </section>
         </template>
 

@@ -51,19 +51,19 @@ const actionLabel = computed(() => {
 });
 const actionMessage = computed(() => {
   const task = store.task.value;
-  if (!task) return "请先选择一个任务。";
-  if (published.value) return "该任务分支已经发布，重复点击不会再次推送。";
-  if (task.queue_id) return "队列子任务不能单独发布，请发布队列完成后的整体结果。";
-  if (task.review_status !== "approved") return "需要先完成人工审核并批准当前 Diff。";
-  if (task.delivery_status !== "archived") return "需要先完成 commit 和本地归档。";
-  if (!commit.value) return "缺少已确认的 commit 证据。";
+  if (!task) return "请先选择一个任务";
+  if (published.value) return "该任务分支已经发布，重复点击不会再次推送";
+  if (task.queue_id) return "队列子任务不能单独发布，请发布队列完成后的整体结果";
+  if (task.review_status !== "approved") return "需要先完成人工审核并批准当前 Diff";
+  if (task.delivery_status !== "archived") return "需要先完成 commit 和本地归档";
+  if (!commit.value) return "缺少已确认的 commit 证据";
   if (!publishConfigured.value) {
-    return "当前项目未启用 GitHub 发布，请先在项目配置中启用。";
+    return "当前项目未启用 GitHub 发布，请先在项目配置中启用";
   }
   if (!configuredRemote.value && autoCreateRemote.value) {
-    return `尚未配置固定 GitHub 远端；点击发布后将创建私有仓库“${repositoryName.value}”，并把已审核 commit 发布到 ${publishBranch.value}。`;
+    return `尚未配置固定 GitHub 远端；点击发布后将创建私有仓库“${repositoryName.value}”，并把已审核 commit 发布到 ${publishBranch.value}`;
   }
-  return `点击后由机器把当前已审核 commit 推送到固定远端的 ${publishBranch.value} 分支；仓库名：${repositoryName.value}。`;
+  return `点击后由机器把当前已审核 commit 推送到固定远端的 ${publishBranch.value} 分支；仓库名：${repositoryName.value}`;
 });
 
 async function publish(): Promise<void> {
@@ -75,12 +75,12 @@ async function publish(): Promise<void> {
 <template>
   <div class="view-stack">
     <header class="view-header">
-      <div><span class="section-kicker">外部交付</span><h1>发布交付</h1><p>只发布已人工批准、已 commit、已归档的单任务结果。新项目首次发布到 main；不会创建 PR 或部署。</p></div>
+      <div><span class="section-kicker">外部交付</span><h1>发布交付</h1><p>只发布已人工批准、已 commit、已归档的单任务结果。新项目首次发布到 main；不会创建 PR 或部署</p></div>
       <span class="safety-statement"><i>✓</i> 显式确认</span>
     </header>
 
     <section v-if="!store.task.value" class="surface empty-state large-empty">
-      <h2>没有选中的任务</h2><p>请先从历史记录打开一个已完成任务，再回到本页。</p>
+      <h2>没有选中的任务</h2><p>请先从历史记录打开一个已完成任务，再回到本页</p>
       <RouterLink class="secondary-button link-button" to="/history">查看历史</RouterLink>
     </section>
 
@@ -100,7 +100,7 @@ async function publish(): Promise<void> {
       <div v-if="published" class="global-success"><strong>已发布到 GitHub</strong><span>{{ String(store.task.value.publish.published_at || '') }} · {{ String(store.task.value.publish.branch || '') }}</span></div>
       <div class="review-form publish-action" data-test="publish-action">
         <label>发布确认人<input v-model="reviewer" maxlength="200" placeholder="填写你的姓名或标识" :disabled="published" /></label>
-        <label class="check-row"><input v-model="confirmed" type="checkbox" :disabled="published" />我确认将上述 commit 推送到固定 GitHub 远端<span v-if="!configuredRemote && autoCreateRemote">（必要时自动创建私有仓库）</span>。</label>
+        <label class="check-row"><input v-model="confirmed" type="checkbox" :disabled="published" />我确认将上述 commit 推送到固定 GitHub 远端<span v-if="!configuredRemote && autoCreateRemote">（必要时自动创建私有仓库）</span></label>
         <button class="primary-button" type="button" :disabled="actionDisabled || !confirmed || !reviewer.trim()" @click="publish">{{ actionLabel }}</button>
         <p class="field-hint">{{ actionMessage }}</p>
       </div>

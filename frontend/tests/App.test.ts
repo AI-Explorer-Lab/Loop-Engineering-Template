@@ -154,6 +154,7 @@ function planDraft(): PlanDraft {
     }],
     unassigned_acceptance_ids: [],
     warnings: [],
+    clarification_questions: [],
     planner_thread_id: "thread-plan",
     created_at: "2026-07-18T08:00:00+08:00",
   };
@@ -216,7 +217,7 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="criteria"]').setValue("1. Filtering works");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     await flushPromises();
 
@@ -251,7 +252,7 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="criteria"]').setValue("1. Filtering works");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     await flushPromises();
 
@@ -327,9 +328,9 @@ describe("App workbench", () => {
     await wrapper.get('[data-test="queue-mode"]').trigger("click");
     await wrapper.get('[data-test="queue-name"]').setValue("交易管理");
     await wrapper.get('[data-test="subtask-requirement-0"]').setValue("新增交易");
-    await wrapper.get('[data-test="subtask-0-criterion-0"]').setValue("可以新增");
+    await wrapper.get('[data-test="subtask-0-criteria"]').setValue("1. 可以新增");
     await wrapper.get('[data-test="subtask-requirement-1"]').setValue("交易列表");
-    await wrapper.get('[data-test="subtask-1-criterion-0"]').setValue("可以查看");
+    await wrapper.get('[data-test="subtask-1-criteria"]').setValue("1. 可以查看");
     await wrapper.get('[data-test="queue-form"]').trigger("submit");
     await flushPromises();
     await vi.advanceTimersByTimeAsync(2_000);
@@ -728,7 +729,7 @@ describe("App workbench", () => {
 
   it("does not invent review data for legacy records", async () => {
     localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
-    taskApi.getTask.mockResolvedValue(task("success", { schema_version: 0, legacy: true, history_warning: "历史记录不完整。", review_status: "unavailable", workspace: {}, permissions: {}, diff_url: null }));
+    taskApi.getTask.mockResolvedValue(task("success", { schema_version: 0, legacy: true, history_warning: "历史记录不完整", review_status: "unavailable", workspace: {}, permissions: {}, diff_url: null }));
     const { wrapper } = await mountAt("/review");
     expect(wrapper.text()).toContain("这是一条旧版记录");
     expect(wrapper.find('[data-test="review-panel"]').exists()).toBe(false);

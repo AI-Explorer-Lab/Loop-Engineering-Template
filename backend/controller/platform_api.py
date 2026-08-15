@@ -55,7 +55,20 @@ async def create_project(
             _service(request).create_project,
             name=payload.name,
             repo_path=payload.repo_path,
+            project_type=payload.project_type,
+            validation_options=payload.validation_options,
+            knowledge_actor_id=payload.knowledge_actor_id,
             backend_architecture_enabled=payload.backend_architecture_enabled,
+        )
+    )
+
+
+@router.delete("/projects/{project_id}", response_model=ApiResponse[dict[str, str]])
+async def delete_project(project_id: str, request: Request) -> ApiResponse[dict[str, str]]:
+    return ApiResponse(
+        data=await run_in_threadpool(
+            _service(request).delete_project,
+            project_id,
         )
     )
 

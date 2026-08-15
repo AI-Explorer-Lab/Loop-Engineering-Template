@@ -52,5 +52,5 @@ function lineClass(line: string): string {
       :class="lineClass(line)"
     ><i>{{ index + 1 }}</i>{{ line || " " }}</span></code></pre>
   </div>
-  <div v-else class="empty-state compact-empty"><strong>没有文件差异</strong><p>当前运行没有生成可展示的 Diff。</p></div>
+  <div v-else class="empty-state compact-empty"><strong>没有文件差异</strong><p>当前运行没有生成可展示的 Diff</p></div>
 </template>

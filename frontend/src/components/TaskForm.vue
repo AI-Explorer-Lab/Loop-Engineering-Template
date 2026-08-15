@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 
 import type { TaskCreatePayload } from "../types/task";
 
@@ -13,29 +13,40 @@ const emit = defineEmits<{
 }>();
 
 const requirement = ref("");
-const criteria = ref([""]);
+const criteriaText = ref("");
 const validationMessage = ref("");
 
-const canRemoveCriterion = computed(() => criteria.value.length > 1);
-
-function addCriterion(): void {
-  criteria.value.push("");
+function handleCriteriaKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Enter") return;
+  const textarea = event.target as HTMLTextAreaElement;
+  const beforeCursor = textarea.value.slice(0, textarea.selectionStart);
+  const nextNumber = beforeCursor.split("\n").length + 1;
+  const afterCursor = textarea.value.slice(textarea.selectionEnd);
+  const nextValue = `${beforeCursor}\n${nextNumber}. ${afterCursor}`;
+  event.preventDefault();
+  criteriaText.value = nextValue;
+  requestAnimationFrame(() => {
+    const cursor = beforeCursor.length + `\n${nextNumber}. `.length;
+    textarea.setSelectionRange(cursor, cursor);
+  });
 }
 
-function removeCriterion(index: number): void {
-  if (!canRemoveCriterion.value) return;
-  criteria.value.splice(index, 1);
+function parseCriteria(): string[] {
+  return criteriaText.value
+    .split("\n")
+    .map((item) => item.replace(/^\s*\d+[.)、]\s*/, "").trim())
+    .filter(Boolean);
 }
 
 function submit(): void {
   const normalizedRequirement = requirement.value.trim();
-  const normalizedCriteria = criteria.value.map((item) => item.trim());
+  const normalizedCriteria = parseCriteria();
   if (!normalizedRequirement) {
-    validationMessage.value = "请填写功能需求。";
+    validationMessage.value = "请填写功能需求";
     return;
   }
-  if (normalizedCriteria.some((item) => !item)) {
-    validationMessage.value = "每条验收标准都需要填写。";
+  if (!normalizedCriteria.length) {
+    validationMessage.value = "每条验收标准都需要填写";
     return;
   }
   validationMessage.value = "";
@@ -63,39 +74,15 @@ function submit(): void {
     <fieldset class="criteria" :disabled="props.disabled">
       <legend>验收标准</legend>
       <p class="field-hint">
-        尽量写成可观察、可验证的结果，例如“传入 min_amount=100 时，只返回金额大于或等于 100 的交易”。
+        每行写一条可观察、可验证的结果，编号可写可不写。按回车会自动生成下一项编号，两种格式都支持
       </p>
-      <div
-        v-for="(_, index) in criteria"
-        :key="index"
-        class="criterion-row"
-      >
-        <span class="criterion-index">{{ index + 1 }}</span>
-        <input
-          v-model="criteria[index]"
-          :data-test="`criterion-${index}`"
-          type="text"
-          :placeholder="`验收标准 ${index + 1}`"
-        />
-        <button
-          class="icon-button"
-          type="button"
-          :disabled="!canRemoveCriterion || props.disabled"
-          :aria-label="`删除验收标准 ${index + 1}`"
-          @click="removeCriterion(index)"
-        >
-          ×
-        </button>
-      </div>
-      <button
-        class="secondary-button"
-        data-test="add-criterion"
-        type="button"
-        :disabled="props.disabled"
-        @click="addCriterion"
-      >
-        + 增加验收标准
-      </button>
+      <textarea
+        v-model="criteriaText"
+        data-test="criteria"
+        rows="6"
+        placeholder="每行一条，可写编号：1. 传入 min_amount=100 时，只返回金额大于或等于 100 的交易"
+        @keydown="handleCriteriaKeydown"
+      />
     </fieldset>
 
     <p v-if="validationMessage" class="form-error" role="alert">

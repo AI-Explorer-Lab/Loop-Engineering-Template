@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import CopyButton from "./CopyButton.vue";
 import {
@@ -10,6 +10,8 @@ import type { TaskData } from "../types/task";
 
 const props = defineProps<{ task: TaskData }>();
 const store = useOrchestrator();
+const now = ref(Date.now());
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 const labels: Record<TaskData["status"], string> = {
   accepted: "已接收",
@@ -68,14 +70,32 @@ const effectivePermissions = computed(() => {
 });
 const elapsed = computed(() => {
   const started = new Date(props.task.started_at).getTime();
-  const ended = new Date(
-    props.task.finished_at || props.task.updated_at || props.task.started_at,
-  ).getTime();
+  const liveStatuses: TaskData["status"][] = [
+    "accepted",
+    "running",
+    "pausing",
+    "cancelling",
+  ];
+  const ended = props.task.finished_at
+    ? new Date(props.task.finished_at).getTime()
+    : liveStatuses.includes(props.task.status)
+      ? now.value
+      : new Date(props.task.updated_at || props.task.started_at).getTime();
   if (!Number.isFinite(started) || !Number.isFinite(ended)) return "—";
   const seconds = Math.max(0, Math.round((ended - started) / 1000));
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes} 分 ${seconds % 60} 秒`;
+});
+
+onMounted(() => {
+  elapsedTimer = setInterval(() => {
+    now.value = Date.now();
+  }, 1_000);
+});
+
+onUnmounted(() => {
+  if (elapsedTimer !== null) clearInterval(elapsedTimer);
 });
 
 function formatTime(value: string | null): string {
@@ -134,7 +154,7 @@ function formatTime(value: string | null): string {
 
     <div v-if="task.audit_summary.integrity_status === 'invalid'" class="callout danger-callout">
       <strong>审计日志无效</strong>
-      <p>事件序号或 JSONL 结构不连续。业务状态保持不变，但 Review、Commit 和 Archive 已阻断。</p>
+      <p>事件序号或 JSONL 结构不连续。业务状态保持不变，但 Review、Commit 和 Archive 已阻断</p>
     </div>
     <div v-if="task.history_warning" class="callout warning-callout">
       <strong>历史记录不完整</strong><p>{{ task.history_warning }}</p>
@@ -143,11 +163,11 @@ function formatTime(value: string | null): string {
       <strong>运行环境故障</strong><p>{{ task.infrastructure_error }}</p>
     </div>
     <div v-else-if="task.delivery_status === 'failed'" class="callout danger-callout">
-      <strong>自动交付需要处理</strong><p>{{ task.last_error_summary || "可从审核页重试 commit 或知识归档。" }}</p>
+      <strong>自动交付需要处理</strong><p>{{ task.last_error_summary || "可从审核页重试 commit 或知识归档" }}</p>
     </div>
     <div v-else-if="task.status === 'manual_review'" class="callout warning-callout">
       <strong>机器流程需要人工判断</strong>
-      <p>{{ task.last_error_summary || "代码已连续三轮验证失败。" }}</p>
+      <p>{{ task.last_error_summary || "代码已连续三轮验证失败" }}</p>
     </div>
   </section>
 </template>
