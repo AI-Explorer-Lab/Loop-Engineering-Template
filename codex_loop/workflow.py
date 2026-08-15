@@ -83,6 +83,7 @@ class OrchestrationWorkflow:
         knowledge_actor_id: str = "",
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
         backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
+        include_memory: bool = True,
     ) -> None:
         self.control_repo_root = Path(repo_root).expanduser().resolve()
         self.repo_root = self.control_repo_root  # compatibility alias
@@ -109,6 +110,7 @@ class OrchestrationWorkflow:
         self.evaluation_coordinator = evaluation_coordinator
         self.knowledge_actor_id = str(knowledge_actor_id)
         self.backend_architecture_bootstrap = backend_architecture_bootstrap
+        self.include_memory = bool(include_memory)
         self.validation_profile = (
             validation_profile
             if isinstance(validation_profile, ValidationProfile)
@@ -1145,7 +1147,7 @@ class OrchestrationWorkflow:
                 stage="generation",
                 query=query,
                 actor=self.knowledge_actor_id,
-                include_memory=True,
+                include_memory=self.include_memory,
                 exclude_knowledge_ids=excluded,
             )
 
@@ -1162,7 +1164,7 @@ class OrchestrationWorkflow:
             stage="generation",
             query=query,
             actor=self.knowledge_actor_id,
-            include_memory=True,
+            include_memory=self.include_memory,
             exclude_knowledge_ids=excluded,
         )
         if bootstrap_context is None:

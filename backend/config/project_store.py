@@ -9,6 +9,65 @@ from typing import Any
 from codex_loop.state import _atomic_write_text, redact_sensitive_data
 
 
+PROJECT_TYPES = {"python", "frontend", "fullstack"}
+
+
+VALIDATION_OPTIONS = {
+    "python_tests": {
+        "required_paths": ["tests"],
+        "test_group": {
+            "name": "python-tests",
+            "root": "tests",
+            "path_base": ".",
+            "suffixes": [".py"],
+            "command": ["python3", "-m", "unittest", "{tests}", "-v"],
+        },
+        "full_command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+        "preflight": [],
+    },
+    "frontend_tests": {
+        "required_paths": ["frontend/package.json"],
+        "dependency_paths": ["frontend/node_modules"],
+        "test_group": {
+            "name": "frontend-tests",
+            "root": "frontend",
+            "path_base": "frontend",
+            "suffixes": [".test.ts", ".spec.ts"],
+            "command": ["npm", "--prefix", "frontend", "test", "--", "{tests}"],
+        },
+        "full_command": ["npm", "--prefix", "frontend", "test"],
+        "preflight": [
+            {
+                "command": ["npm", "--version"],
+                "unavailable_message": "Node/npm runtime is unavailable",
+            }
+        ],
+    },
+    "frontend_typecheck": {
+        "required_paths": ["frontend/package.json"],
+        "dependency_paths": ["frontend/node_modules"],
+        "full_command": ["npm", "--prefix", "frontend", "run", "typecheck"],
+        "preflight": [
+            {
+                "command": ["npm", "--version"],
+                "unavailable_message": "Node/npm runtime is unavailable",
+            }
+        ],
+    },
+    "frontend_build": {
+        "required_paths": ["frontend/package.json"],
+        "dependency_paths": ["frontend/node_modules"],
+        "full_command": ["npm", "--prefix", "frontend", "run", "build"],
+        "preflight": [
+            {
+                "command": ["npm", "--version"],
+                "unavailable_message": "Node/npm runtime is unavailable",
+            }
+        ],
+    },
+}
+
+
 DEFAULT_PROJECT_STORE = Path(__file__).resolve().parents[2] / ".codex-orchestrator" / "projects.json"
 
 
@@ -73,9 +132,79 @@ def default_project_validation() -> dict[str, Any]:
     }
 
 
+def validation_for_project(
+    project_type: str,
+    selected_options: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a trusted validation profile from project type and known options."""
+
+    normalized_type = str(project_type).strip().lower()
+    if normalized_type not in PROJECT_TYPES:
+        raise ValueError(f"unsupported project_type: {normalized_type}")
+    defaults = {
+        "python": ["python_tests"],
+        "frontend": ["frontend_tests"],
+        "fullstack": ["python_tests", "frontend_tests"],
+    }
+    selected = list(defaults[normalized_type] if selected_options is None else selected_options)
+    allowed = {
+        "python": {"python_tests"},
+        "frontend": {"frontend_tests", "frontend_typecheck", "frontend_build"},
+        "fullstack": {"python_tests", "frontend_tests", "frontend_typecheck", "frontend_build"},
+    }[normalized_type]
+    unknown = sorted(set(selected) - allowed)
+    if unknown:
+        raise ValueError(
+            f"validation options are not available for {normalized_type}: {', '.join(unknown)}"
+        )
+    required = set(defaults[normalized_type])
+    missing = sorted(required - set(selected))
+    if missing:
+        raise ValueError(
+            f"required validation options are missing for {normalized_type}: {', '.join(missing)}"
+        )
+
+    required_paths: list[str] = []
+    dependency_paths: list[str] = []
+    preflight: list[dict[str, Any]] = []
+    test_groups: list[dict[str, Any]] = []
+    full_commands: list[list[str]] = []
+    for option in selected:
+        definition = VALIDATION_OPTIONS[option]
+        required_paths.extend(definition.get("required_paths", []))
+        dependency_paths.extend(definition.get("dependency_paths", []))
+        preflight.extend(definition.get("preflight", []))
+        if "test_group" in definition:
+            test_groups.append(definition["test_group"])
+        full_command = definition.get("full_command")
+        if full_command:
+            full_commands.append(full_command)
+    return {
+        "required_paths": list(dict.fromkeys(required_paths)),
+        "dependency_paths": list(dict.fromkeys(dependency_paths)),
+        "preflight": _unique_mappings(preflight),
+        "test_groups": test_groups,
+        "full_commands": full_commands,
+    }
+
+
+def _unique_mappings(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        key = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
 __all__ = [
     "append_created_project",
     "default_project_validation",
+    "PROJECT_TYPES",
+    "VALIDATION_OPTIONS",
+    "validation_for_project",
     "load_created_projects",
     "project_store_path",
 ]

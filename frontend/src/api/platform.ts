@@ -36,6 +36,9 @@ export function getProjects(): Promise<ProjectData[]> {
 export function createProject(payload: {
   name: string;
   repo_path: string;
+  project_type: string;
+  validation_options: string[];
+  knowledge_actor_id: string;
   backend_architecture_enabled?: boolean;
 }): Promise<ProjectData> {
   return apiRequest<ProjectData>("/api/projects", {

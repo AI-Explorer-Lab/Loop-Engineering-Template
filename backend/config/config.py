@@ -73,6 +73,10 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "knowledge_actor_id": str(
                     agent.get("knowledge_actor_id", "")
                 ).strip(),
+                "knowledge_enabled": True,
+                "memory_enabled": True,
+                "project_type": "python",
+                "validation_options": [],
                 "validation_profile": ValidationProfile.from_mapping(
                     agent.get("validation")
                 ),
@@ -117,6 +121,12 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "knowledge_actor_id": str(
                     item.get("knowledge_actor_id", "")
                 ).strip(),
+                "knowledge_enabled": bool(item.get("knowledge_enabled", True)),
+                "memory_enabled": bool(item.get("memory_enabled", True)),
+                "project_type": str(item.get("project_type", "python")).strip().lower(),
+                "validation_options": [
+                    str(value).strip() for value in item.get("validation_options", [])
+                ],
                 "_created_from_registry": bool(
                     item.get("_created_from_registry", False)
                 ),

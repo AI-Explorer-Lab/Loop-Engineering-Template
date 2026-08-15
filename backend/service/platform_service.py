@@ -57,6 +57,10 @@ class PlatformService:
             "is_default": context.is_default,
             "active_identifier": context.task_service.executor.active_task_id(),
             "knowledge_actor_id": context.knowledge_actor_id,
+            "knowledge_enabled": context.knowledge_enabled,
+            "memory_enabled": context.memory_enabled,
+            "project_type": context.project_type,
+            "validation_options": list(context.validation_options),
             "publish_enabled": context.publish_enabled,
             "publish_auto_create_remote": context.publish_auto_create_remote,
             "publish_remote_name": context.publish_remote_name,
@@ -78,11 +82,17 @@ class PlatformService:
         *,
         name: str,
         repo_path: str,
+        project_type: str = "python",
+        validation_options: list[str] | None = None,
+        knowledge_actor_id: str = "",
         backend_architecture_enabled: bool = False,
     ) -> dict[str, Any]:
         context = self.registry.create_project(
             name=name,
             repo_path=repo_path,
+            project_type=project_type,
+            validation_options=validation_options,
+            knowledge_actor_id=knowledge_actor_id,
             backend_architecture_enabled=backend_architecture_enabled,
         )
         return self.project_data(context)

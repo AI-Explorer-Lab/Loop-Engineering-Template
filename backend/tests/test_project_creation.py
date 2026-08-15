@@ -32,17 +32,25 @@ def _config(control_root: Path, registry_path: Path) -> dict[str, object]:
 
 def test_new_project_endpoint_creates_git_project_and_persists_registration(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     control_root = tmp_path / "control"
     control_root.mkdir()
     target = tmp_path / "read-notes"
     registry_path = tmp_path / "projects.json"
     config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
 
     with TestClient(create_app(config=config, validate_config=False)) as client:
         response = client.post(
             "/api/projects",
-            json={"name": "Reading Notes", "repo_path": str(target)},
+            json={
+                "name": "Reading Notes",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
         )
         projects = client.get("/api/projects")
 
@@ -65,6 +73,8 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         "secure_runtime_root": ".codex-runtime",
     }
     assert (target / ".git").is_dir()
+    assert (target / "tests" / "__init__.py").is_file()
+    assert (target / "tests" / "test_smoke.py").is_file()
     assert subprocess.run(
         ["git", "-C", str(target), "branch", "--show-current"],
         capture_output=True,
@@ -78,6 +88,7 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
         check=True,
     ).stdout.splitlines()
     assert ".harness/project.json" in tracked
+    assert "tests/test_smoke.py" in tracked
     assert "read-notes" in {item["project_id"] for item in projects.json()["data"]}
 
     restarted = ProjectRegistry(config)
@@ -90,6 +101,7 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
 
 def test_new_project_persists_one_time_backend_architecture_configuration(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     control_root = tmp_path / "control"
     control_root.mkdir()
@@ -106,6 +118,7 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
             "knowledge_writer_actor_id": "orchestrator",
         },
     }
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
 
     with TestClient(create_app(config=config, validate_config=False)) as client:
         response = client.post(
@@ -113,6 +126,9 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
             json={
                 "name": "Daily Journal",
                 "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
                 "backend_architecture_enabled": True,
             },
         )

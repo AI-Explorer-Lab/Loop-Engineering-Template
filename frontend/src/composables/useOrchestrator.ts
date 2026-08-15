@@ -620,6 +620,9 @@ export function createOrchestrator() {
   async function createProject(payload: {
     name: string;
     repo_path: string;
+    project_type: string;
+    validation_options: string[];
+    knowledge_actor_id: string;
     backend_architecture_enabled?: boolean;
   }): Promise<ProjectData | null> {
     pageError.value = "";

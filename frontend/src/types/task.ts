@@ -213,6 +213,10 @@ export interface ProjectData {
   is_default: boolean;
   active_identifier: string | null;
   knowledge_actor_id: string;
+  knowledge_enabled?: boolean;
+  memory_enabled?: boolean;
+  project_type?: string;
+  validation_options?: string[];
   publish_enabled?: boolean;
   publish_auto_create_remote?: boolean;
   publish_remote_name?: string;

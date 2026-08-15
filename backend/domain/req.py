@@ -111,6 +111,9 @@ class NotificationSettingsRequest(BaseModel):
 class ProjectCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     repo_path: str = Field(min_length=1, max_length=2_000)
+    project_type: str = Field(default="python", min_length=1, max_length=30)
+    validation_options: list[str] = Field(default_factory=list, max_length=10)
+    knowledge_actor_id: str = Field(min_length=1, max_length=100)
     backend_architecture_enabled: bool = False
 
     @field_validator("name", "repo_path")
@@ -119,6 +122,24 @@ class ProjectCreateRequest(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("project value cannot be blank")
+        return normalized
+
+    @field_validator("project_type", "knowledge_actor_id")
+    @classmethod
+    def normalize_project_option(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("project option cannot be blank")
+        return normalized
+
+    @field_validator("validation_options")
+    @classmethod
+    def normalize_validation_options(cls, values: list[str]) -> list[str]:
+        normalized = [str(value).strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("validation options cannot be blank")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("validation options must be unique")
         return normalized
 
 

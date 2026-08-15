@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from ..exceptions.business_exception import BusinessException
 
@@ -40,6 +41,9 @@ def provision_git_project(
     *,
     project_id: str,
     project_name: str,
+    project_type: str = "python",
+    validation_options: list[str] | None = None,
+    required_paths: list[str] | None = None,
 ) -> None:
     """Create one new Git project with tracked Harness configuration."""
 
@@ -76,8 +80,22 @@ def provision_git_project(
             + "\n",
             encoding="utf-8",
         )
+        _write_project_scaffold(
+            path,
+            project_type=project_type,
+            validation_options=validation_options or [],
+        )
+        missing = [
+            relative
+            for relative in required_paths or []
+            if not (path / relative).exists()
+        ]
+        if missing:
+            raise ProjectProvisioningError(
+                "project scaffold is missing required paths: " + ", ".join(missing)
+            )
         _run_git(path, "init", "-b", "main")
-        _run_git(path, "add", ".gitignore", f"{HARNESS_DIRECTORY}/{HARNESS_CONFIG_FILE}")
+        _run_git(path, "add", ".")
         _run_git(
             path,
             "-c",
@@ -99,6 +117,95 @@ def provision_git_project(
         raise ProjectProvisioningError(
             f"project initialization failed: {type(exc).__name__}", status_code=500
         ) from exc
+
+
+def _write_project_scaffold(
+    path: Path,
+    *,
+    project_type: str,
+    validation_options: list[str],
+) -> None:
+    """Write only the selected, minimal files needed by the validation profile."""
+
+    selected = set(validation_options)
+    if "python_tests" in selected:
+        tests = path / "tests"
+        tests.mkdir(parents=True, exist_ok=True)
+        (tests / "__init__.py").write_text("", encoding="utf-8")
+        (tests / "test_smoke.py").write_text(
+            "import unittest\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_project_bootstrap(self) -> None:\n        self.assertTrue(True)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+            encoding="utf-8",
+        )
+
+    frontend_options = {
+        "frontend_tests",
+        "frontend_typecheck",
+        "frontend_build",
+    }
+    if selected & frontend_options:
+        frontend = path / "frontend"
+        (frontend / "src").mkdir(parents=True, exist_ok=True)
+        package: dict[str, Any] = {
+            "name": path.name.lower().replace("_", "-"),
+            "private": True,
+            "version": "0.1.0",
+            "type": "module",
+            "scripts": {},
+            "devDependencies": {},
+        }
+        scripts = package["scripts"]
+        dev_dependencies = package["devDependencies"]
+        if "frontend_tests" in selected:
+            scripts["test"] = "vitest run"
+            dev_dependencies.update(
+                {
+                    "@vitejs/plugin-vue": "^6.0.8",
+                    "@vue/test-utils": "^2.4.6",
+                    "jsdom": "^26.1.0",
+                    "typescript": "~5.9.3",
+                    "vite": "^8.1.4",
+                    "vitest": "^3.2.4",
+                }
+            )
+            (frontend / "vitest.config.ts").write_text(
+                'import { defineConfig } from "vitest/config";\n\nexport default defineConfig({\n  test: { environment: "node" },\n});\n',
+                encoding="utf-8",
+            )
+            (frontend / "src" / "smoke.test.ts").write_text(
+                'import { describe, expect, it } from "vitest";\n\ndescribe("project bootstrap", () => {\n  it("has a working test runner", () => {\n    expect(true).toBe(true);\n  });\n});\n',
+                encoding="utf-8",
+            )
+        if "frontend_typecheck" in selected:
+            scripts["typecheck"] = "tsc --noEmit"
+            dev_dependencies["typescript"] = "~5.9.3"
+            (frontend / "tsconfig.json").write_text(
+                '{\n  "compilerOptions": {\n    "target": "ES2022",\n    "module": "ESNext",\n    "moduleResolution": "Bundler",\n    "strict": true,\n    "noEmit": true\n  },\n  "include": ["src/**/*.ts"]\n}\n',
+                encoding="utf-8",
+            )
+        if "frontend_build" in selected:
+            scripts["build"] = "vite build"
+            dev_dependencies.update(
+                {
+                    "@vitejs/plugin-vue": "^6.0.8",
+                    "vite": "^8.1.4",
+                }
+            )
+            (frontend / "index.html").write_text(
+                '<!doctype html>\n<html><head><meta charset="UTF-8"><title>Project</title></head><body><div id="app"></div><script type="module" src="/src/main.ts"></script></body></html>\n',
+                encoding="utf-8",
+            )
+            (frontend / "vite.config.ts").write_text(
+                'import { defineConfig } from "vite";\n\nexport default defineConfig({});\n',
+                encoding="utf-8",
+            )
+            (frontend / "src" / "main.ts").write_text(
+                'const root = document.querySelector<HTMLDivElement>("#app");\nif (root) root.textContent = "Project bootstrap";\n',
+                encoding="utf-8",
+            )
+        (frontend / "package.json").write_text(
+            json.dumps(package, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _run_git(path: Path, *args: str) -> None:

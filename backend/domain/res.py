@@ -30,6 +30,10 @@ class ProjectData(BaseModel):
     is_default: bool
     active_identifier: str | None = None
     knowledge_actor_id: str = ""
+    knowledge_enabled: bool = True
+    memory_enabled: bool = True
+    project_type: str = "python"
+    validation_options: list[str] = Field(default_factory=list)
     publish_enabled: bool = False
     publish_auto_create_remote: bool = False
     publish_remote_name: str = "origin"

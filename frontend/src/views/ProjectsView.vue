@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { useOrchestrator } from "../composables/useOrchestrator";
@@ -9,9 +9,37 @@ const router = useRouter();
 const showCreateForm = ref(false);
 const projectName = ref("");
 const projectPath = ref("");
+const projectType = ref<"python" | "frontend" | "fullstack">("python");
+const knowledgeActorId = ref("");
+const selectedValidationOptions = ref<string[]>(["python_tests"]);
 const backendArchitectureEnabled = ref(false);
 const formError = ref("");
 const creating = ref(false);
+const validationOptions = computed(() => projectType.value === "python"
+  ? [{ id: "python_tests", label: "Python 测试", required: true }]
+  : projectType.value === "fullstack"
+    ? [
+        { id: "python_tests", label: "后端 Python 测试", required: true },
+        { id: "frontend_tests", label: "前端单元测试", required: true },
+        { id: "frontend_typecheck", label: "TypeScript 类型检查", required: false },
+        { id: "frontend_build", label: "前端生产构建", required: false },
+      ]
+    : [
+        { id: "frontend_tests", label: "前端单元测试", required: true },
+        { id: "frontend_typecheck", label: "TypeScript 类型检查", required: false },
+        { id: "frontend_build", label: "前端生产构建", required: false },
+      ]);
+
+watch(projectType, (value) => {
+  selectedValidationOptions.value = value === "python"
+    ? ["python_tests"]
+    : value === "fullstack" ? ["python_tests", "frontend_tests"] : ["frontend_tests"];
+});
+
+function toggleValidationOption(id: string, checked: boolean): void {
+  if (!checked) selectedValidationOptions.value = selectedValidationOptions.value.filter((item) => item !== id);
+  else if (!selectedValidationOptions.value.includes(id)) selectedValidationOptions.value.push(id);
+}
 
 async function select(projectId: string): Promise<void> {
   await store.selectProject(projectId);
@@ -21,8 +49,9 @@ async function select(projectId: string): Promise<void> {
 async function create(): Promise<void> {
   const name = projectName.value.trim();
   const repoPath = projectPath.value.trim();
-  if (!name || !repoPath) {
-    formError.value = "请填写项目名称和目标路径。";
+  const actor = knowledgeActorId.value.trim();
+  if (!name || !repoPath || !actor) {
+    formError.value = "请填写项目名称、目标路径和知识库身份。";
     return;
   }
   formError.value = "";
@@ -30,6 +59,9 @@ async function create(): Promise<void> {
   const created = await store.createProject({
     name,
     repo_path: repoPath,
+    project_type: projectType.value,
+    validation_options: selectedValidationOptions.value,
+    knowledge_actor_id: actor,
     backend_architecture_enabled: backendArchitectureEnabled.value,
   });
   creating.value = false;
@@ -39,6 +71,9 @@ async function create(): Promise<void> {
   }
   projectName.value = "";
   projectPath.value = "";
+  knowledgeActorId.value = "";
+  projectType.value = "python";
+  selectedValidationOptions.value = ["python_tests"];
   backendArchitectureEnabled.value = false;
   showCreateForm.value = false;
   await router.push("/create");
@@ -52,10 +87,13 @@ async function create(): Promise<void> {
       <button class="primary-button" type="button" data-test="new-project" @click="showCreateForm = !showCreateForm">＋ 新建项目</button>
     </header>
     <section v-if="showCreateForm" class="surface project-create-form" data-test="project-create-form">
-      <div class="surface-heading compact-heading"><div><span class="section-kicker">创建本地项目</span><h2>填写项目名称和目标路径</h2></div></div>
+      <div class="surface-heading compact-heading"><div><span class="section-kicker">创建本地项目</span><h2>填写项目基础配置</h2></div></div>
       <form class="task-form" @submit.prevent="create">
         <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：read-notes" /></label>
         <label>目标路径<input v-model="projectPath" data-test="project-path" :disabled="creating" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
+        <label>项目类型<select v-model="projectType" :disabled="creating"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
+        <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验。</span></label>
+        <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creating || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}</span></label></fieldset>
         <label class="project-architecture-toggle">
           <input v-model="backendArchitectureEnabled" data-test="backend-architecture-enabled" type="checkbox" :disabled="creating" />
           <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次。</small></span>
@@ -77,6 +115,6 @@ async function create(): Promise<void> {
         <span v-else class="selected-project-label">✓ 当前项目</span>
       </article>
     </div>
-    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并注册默认 Python unittest 验证配置；认证信息与临时运行状态保持本地隔离，完成后前端自动选中新项目。</p></section>
+    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并按项目类型和勾选项保存验证配置；知识库默认启用，中期记忆默认读取。</p></section>
   </div>
 </template>
