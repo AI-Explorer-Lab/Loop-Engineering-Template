@@ -9,6 +9,7 @@ import platform
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from typing import Any, Mapping, Sequence
 
@@ -229,12 +230,30 @@ class ExecutionPolicy:
             raise InfrastructureError("macOS sandbox-exec is unavailable")
         if not self.app_server_profile_path.is_file():
             raise InfrastructureError("App Server sandbox profile is unavailable")
+        self._verify_sandbox_exec(sandbox_exec, self.app_server_profile_path)
         return (
             str(sandbox_exec),
             "-f",
             str(self.app_server_profile_path),
             "--",
         )
+
+    @staticmethod
+    def _verify_sandbox_exec(sandbox_exec: Path, profile_path: Path) -> None:
+        """Fail clearly when the host exposes sandbox-exec but blocks Seatbelt."""
+
+        probe = subprocess.run(
+            [str(sandbox_exec), "-f", str(profile_path), "--", "/usr/bin/true"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            detail = (probe.stderr or probe.stdout).strip().splitlines()
+            suffix = f": {detail[-1]}" if detail else ""
+            raise InfrastructureError(
+                f"macOS sandbox-exec cannot run in the current host runtime{suffix}"
+            )
 
     def stage_app_server_executable(self, source: str | Path) -> Path:
         """Copy the native App Server binary to its protected runtime path."""
@@ -414,6 +433,7 @@ class ExecutionPolicy:
         )
         profile_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         profile_path.chmod(0o600)
+        self._verify_sandbox_exec(sandbox_exec, profile_path)
         return (str(sandbox_exec), "-f", str(profile_path), "--")
 
     def _runtime_read_paths(self) -> tuple[Path, ...]:
