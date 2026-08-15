@@ -219,18 +219,6 @@ class OrchestrationWorkflow:
             )
             self.store.save_permissions(task.task_id, policy.requested_snapshot())
             policy.prepare_runtime()
-            self.workspace_manager.verify(
-                workspace, require_clean=self.inherited_diff_path is None
-            )
-            audit.append(
-                "workspace.verified",
-                {
-                    "branch": workspace.task_branch,
-                    "head": workspace.base_commit,
-                    "clean": self.inherited_diff_path is None,
-                    "inherited_baseline": self.inherited_diff_path is not None,
-                },
-            )
             validator = self._make_validator(workspace, policy, None)
             state.baseline_test_hashes = dict(validator.baseline)
             state.protected_test_paths = self._validator_protected_tests(

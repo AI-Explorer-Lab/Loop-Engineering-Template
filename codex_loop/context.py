@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from .knowledge import KnowledgeGateway, KnowledgeItem
+from .knowledge import CatalogSnapshot, KnowledgeGateway, KnowledgeItem
 from .memory import MediumTermMemory
 from .models import InfrastructureError, utc_now_iso
 from .skills import SkillItem, SkillRegistry
@@ -26,13 +26,14 @@ class ContextSnapshot:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     budget: dict[str, int] = field(default_factory=dict)
     catalog_sha256: str = ""
+    layer_a_catalog: CatalogSnapshot | None = None
+    layer_b_catalogs: tuple[CatalogSnapshot, ...] = field(default_factory=tuple)
+    retrieval_route: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     created_at: str = field(default_factory=utc_now_iso)
-    schema_version: int = 1
     snapshot_sha256: str = ""
 
     def to_dict(self, *, include_hash: bool = True) -> dict[str, Any]:
         value = {
-            "schema_version": self.schema_version,
             "stage": self.stage,
             "query": self.query,
             "actor": self.actor,
@@ -42,6 +43,11 @@ class ContextSnapshot:
             "warnings": list(self.warnings),
             "budget": dict(self.budget),
             "catalog_sha256": self.catalog_sha256,
+            "layer_a_catalog": (
+                None if self.layer_a_catalog is None else self.layer_a_catalog.to_dict()
+            ),
+            "layer_b_catalogs": [item.to_dict() for item in self.layer_b_catalogs],
+            "retrieval_route": [dict(item) for item in self.retrieval_route],
             "created_at": self.created_at,
         }
         if include_hash:
@@ -50,6 +56,10 @@ class ContextSnapshot:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ContextSnapshot":
+        if "schema_version" in data:
+            raise InfrastructureError(
+                "ContextSnapshot schema_version is no longer supported"
+            )
         return cls(
             stage=str(data["stage"]),
             query=str(data.get("query", "")),
@@ -64,8 +74,22 @@ class ContextSnapshot:
             warnings=tuple(str(item) for item in data.get("warnings", [])),
             budget={str(key): int(value) for key, value in dict(data.get("budget", {})).items()},
             catalog_sha256=str(data.get("catalog_sha256", "")),
+            layer_a_catalog=(
+                None
+                if not isinstance(data.get("layer_a_catalog"), Mapping)
+                else CatalogSnapshot.from_dict(data["layer_a_catalog"])
+            ),
+            layer_b_catalogs=tuple(
+                CatalogSnapshot.from_dict(item)
+                for item in data.get("layer_b_catalogs", [])
+                if isinstance(item, Mapping)
+            ),
+            retrieval_route=tuple(
+                dict(item)
+                for item in data.get("retrieval_route", [])
+                if isinstance(item, Mapping)
+            ),
             created_at=str(data.get("created_at") or utc_now_iso()),
-            schema_version=int(data.get("schema_version", 1)),
             snapshot_sha256=str(data.get("snapshot_sha256", "")),
         )
 
@@ -77,6 +101,11 @@ class ContextSnapshot:
             ),
             "stage": self.stage,
             "snapshot_sha256": self.snapshot_sha256,
+            "layer_a_catalog": (
+                None if self.layer_a_catalog is None else self.layer_a_catalog.to_dict()
+            ),
+            "layer_b_catalogs": [item.to_dict() for item in self.layer_b_catalogs],
+            "retrieval_route": [dict(item) for item in self.retrieval_route],
             "knowledge": [item.to_dict() for item in self.knowledge],
             "skills": [item.to_dict() for item in self.skills],
             "medium_term_memory": [dict(item) for item in self.medium_term_memory],
@@ -129,8 +158,7 @@ class ContextAssembler:
             snapshot = ContextSnapshot.from_dict(value)
             if snapshot.stage != stage:
                 raise InfrastructureError("frozen context stage does not match request")
-            if _snapshot_hash(snapshot) != snapshot.snapshot_sha256:
-                raise InfrastructureError("frozen context snapshot hash changed")
+            snapshot.verify_hash()
             return snapshot
         selection = self.knowledge.retrieve(
             stage=stage,
@@ -162,6 +190,9 @@ class ContextAssembler:
             warnings=tuple(dict.fromkeys([*selection.warnings, *skill_warnings])),
             budget=self.knowledge.budget(stage),
             catalog_sha256=selection.catalog_sha256,
+            layer_a_catalog=selection.layer_a_catalog,
+            layer_b_catalogs=selection.layer_b_catalogs,
+            retrieval_route=selection.retrieval_route,
         )
         snapshot = ContextSnapshot.from_dict(
             {**snapshot.to_dict(include_hash=False), "snapshot_sha256": _snapshot_hash(snapshot)}
@@ -214,6 +245,9 @@ class ContextAssembler:
             warnings=selection.warnings,
             budget=self.knowledge.budget(stage),
             catalog_sha256=selection.catalog_sha256,
+            layer_a_catalog=selection.layer_a_catalog,
+            layer_b_catalogs=selection.layer_b_catalogs,
+            retrieval_route=selection.retrieval_route,
         )
         snapshot = ContextSnapshot.from_dict(
             {**snapshot.to_dict(include_hash=False), "snapshot_sha256": _snapshot_hash(snapshot)}
@@ -271,6 +305,20 @@ def merge_context_snapshots(
         catalog_sha256=hashlib.sha256(
             "".join(item.catalog_sha256 for item in snapshots).encode("utf-8")
         ).hexdigest(),
+        layer_a_catalog=next(
+            (item.layer_a_catalog for item in snapshots if item.layer_a_catalog),
+            None,
+        ),
+        layer_b_catalogs=tuple(
+            catalog
+            for snapshot in snapshots
+            for catalog in snapshot.layer_b_catalogs
+        ),
+        retrieval_route=tuple(
+            route
+            for snapshot in snapshots
+            for route in snapshot.retrieval_route
+        ),
     )
     return ContextSnapshot.from_dict(
         {**merged.to_dict(include_hash=False), "snapshot_sha256": _snapshot_hash(merged)}
