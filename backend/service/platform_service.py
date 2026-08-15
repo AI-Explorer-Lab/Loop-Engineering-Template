@@ -61,6 +61,7 @@ class PlatformService:
             "memory_enabled": context.memory_enabled,
             "project_type": context.project_type,
             "validation_options": list(context.validation_options),
+            "conda_env_name": context.conda_env_name,
             "publish_enabled": context.publish_enabled,
             "publish_auto_create_remote": context.publish_auto_create_remote,
             "publish_remote_name": context.publish_remote_name,

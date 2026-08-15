@@ -44,6 +44,7 @@ def provision_git_project(
     project_type: str = "python",
     validation_options: list[str] | None = None,
     required_paths: list[str] | None = None,
+    commit_initial_state: bool = True,
 ) -> None:
     """Create one new Git project with tracked Harness configuration."""
 
@@ -95,18 +96,8 @@ def provision_git_project(
                 "project scaffold is missing required paths: " + ", ".join(missing)
             )
         _run_git(path, "init", "-b", "main")
-        _run_git(path, "add", ".")
-        _run_git(
-            path,
-            "-c",
-            "user.name=Loop Engineering",
-            "-c",
-            "user.email=loop-engineering@localhost",
-            "commit",
-            "--no-verify",
-            "-m",
-            "Initialize project",
-        )
+        if commit_initial_state:
+            commit_project_state(path)
     except ProjectProvisioningError:
         if created:
             shutil.rmtree(path, ignore_errors=True)
@@ -117,6 +108,23 @@ def provision_git_project(
         raise ProjectProvisioningError(
             f"project initialization failed: {type(exc).__name__}", status_code=500
         ) from exc
+
+
+def commit_project_state(project_path: Path) -> None:
+    """Commit the scaffold plus any dependency lock files created during bootstrap."""
+
+    _run_git(project_path, "add", ".")
+    _run_git(
+        project_path,
+        "-c",
+        "user.name=Loop Engineering",
+        "-c",
+        "user.email=loop-engineering@localhost",
+        "commit",
+        "--no-verify",
+        "-m",
+        "Initialize project",
+    )
 
 
 def _write_project_scaffold(

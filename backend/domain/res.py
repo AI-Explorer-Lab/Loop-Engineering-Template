@@ -34,6 +34,7 @@ class ProjectData(BaseModel):
     memory_enabled: bool = True
     project_type: str = "python"
     validation_options: list[str] = Field(default_factory=list)
+    conda_env_name: str | None = None
     publish_enabled: bool = False
     publish_auto_create_remote: bool = False
     publish_remote_name: str = "origin"

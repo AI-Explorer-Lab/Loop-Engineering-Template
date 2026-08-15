@@ -28,7 +28,11 @@ from ..utils.task_executor import TaskExecutor
 from .queue_service import QueueService
 from .task_service import TaskService
 from .plan_service import PlanService
-from .project_provisioning import provision_git_project
+from .project_provisioning import commit_project_state, provision_git_project
+from .project_environment import (
+    prepare_project_environment,
+    validate_project_name,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +46,7 @@ class ProjectContext:
     memory_enabled: bool
     project_type: str
     validation_options: tuple[str, ...]
+    conda_env_name: str | None
     publish_enabled: bool
     publish_auto_create_remote: bool
     publish_remote_name: str
@@ -105,9 +110,7 @@ class ProjectRegistry:
     ) -> ProjectContext:
         """Provision, register, and make available one new project immediately."""
 
-        normalized_name = str(name).strip()
-        if not normalized_name:
-            raise ValueError("project name cannot be blank")
+        normalized_name = validate_project_name(name)
         path = Path(str(repo_path)).expanduser()
         if not path.is_absolute():
             raise ValueError("project path must be absolute")
@@ -116,15 +119,31 @@ class ProjectRegistry:
         if not actor:
             raise ProjectConfigurationError("knowledge_actor_id cannot be blank")
         self._validate_knowledge_actor(actor)
-        validation = self._validation_for_project(project_type, validation_options)
         project_id = self._new_project_id(normalized_name, path)
+        initial_validation = self._validation_for_project(
+            project_type,
+            validation_options,
+        )
         provision_git_project(
             path,
             project_id=project_id,
             project_name=normalized_name,
             project_type=project_type,
             validation_options=validation_options,
-            required_paths=validation["required_paths"],
+            required_paths=initial_validation["required_paths"],
+            commit_initial_state=False,
+        )
+        environment = prepare_project_environment(
+            path,
+            project_name=normalized_name,
+            project_type=project_type,
+            validation_options=validation_options or [],
+        )
+        commit_project_state(path)
+        validation = self._validation_for_project(
+            project_type,
+            validation_options,
+            python_env_name=environment.conda_env_name,
         )
         item = {
             "id": project_id,
@@ -138,6 +157,7 @@ class ProjectRegistry:
             "memory_enabled": True,
             "project_type": str(project_type).strip().lower(),
             "validation_options": list(validation_options or []),
+            "conda_env_name": environment.conda_env_name,
             "backend_architecture_enabled": bool(backend_architecture_enabled),
             "backend_architecture_knowledge_id": BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             "publish": {
@@ -196,9 +216,10 @@ class ProjectRegistry:
     def _validation_for_project(
         project_type: str,
         validation_options: list[str] | None,
+        python_env_name: str | None = None,
     ) -> dict[str, Any]:
         try:
-            return validation_for_project(project_type, validation_options)
+            return validation_for_project(project_type, validation_options, python_env_name)
         except ValueError as exc:
             raise ProjectConfigurationError(str(exc)) from exc
 
@@ -229,6 +250,7 @@ class ProjectRegistry:
         validation_options = tuple(
             str(value).strip() for value in item.get("validation_options", [])
         )
+        conda_env_name = str(item.get("conda_env_name", "")).strip() or None
         backend_architecture_enabled = bool(
             item.get("backend_architecture_enabled", False)
         )
@@ -287,6 +309,7 @@ class ProjectRegistry:
             memory_enabled=bool(item.get("memory_enabled", True)),
             project_type=project_type,
             validation_options=validation_options,
+            conda_env_name=conda_env_name,
             publish_enabled=publish_enabled,
             publish_auto_create_remote=publish_auto_create_remote,
             publish_remote_name=publish_remote_name,

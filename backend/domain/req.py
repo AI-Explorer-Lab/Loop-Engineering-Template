@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 from typing import Any
 
+from ..service.project_environment import validate_project_name as validate_project_name_value
+
 
 class TaskCreateRequest(BaseModel):
     requirement: str = Field(min_length=1, max_length=20_000)
@@ -123,6 +125,11 @@ class ProjectCreateRequest(BaseModel):
         if not normalized:
             raise ValueError("project value cannot be blank")
         return normalized
+
+    @field_validator("name")
+    @classmethod
+    def validate_project_name(cls, value: str) -> str:
+        return validate_project_name_value(value)
 
     @field_validator("project_type", "knowledge_actor_id")
     @classmethod

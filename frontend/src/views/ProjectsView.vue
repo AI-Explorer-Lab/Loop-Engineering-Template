@@ -54,6 +54,10 @@ async function create(): Promise<void> {
     formError.value = "请填写项目名称、目标路径和知识库身份";
     return;
   }
+  if (!/^[A-Za-z0-9]{1,64}$/.test(name)) {
+    formError.value = "项目名称只能包含英文字母和数字，长度 1-64 位";
+    return;
+  }
   formError.value = "";
   creating.value = true;
   const created = await store.createProject({
@@ -94,7 +98,7 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
     <section v-if="showCreateForm" class="surface project-create-form" data-test="project-create-form">
       <div class="surface-heading compact-heading"><div><span class="section-kicker">创建本地项目</span><h2>填写项目基础配置</h2></div></div>
       <form class="task-form" @submit.prevent="create">
-        <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：read-notes" /></label>
+        <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：account" /><span class="field-hint">只能使用英文字母和数字，1-64 位；将绑定 Python 环境名</span></label>
         <label>目标路径<input v-model="projectPath" data-test="project-path" :disabled="creating" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creating"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验</span></label>
@@ -112,6 +116,7 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
       <article v-for="project in store.projects.value" :key="project.project_id" class="surface project-card" :class="{ selected: project.project_id === store.activeProjectId.value }">
         <div class="project-card-top"><span class="project-glyph">{{ project.name.slice(0, 1).toUpperCase() }}</span><span v-if="project.is_default" class="default-chip">默认</span></div>
         <h2>{{ project.name }}</h2><code>{{ project.repo_root }}</code>
+        <div v-if="project.conda_env_name" class="project-environment">Python 环境：<code>{{ project.conda_env_name }}</code></div>
         <div v-if="project.backend_architecture_enabled" class="project-architecture-state">
           后端架构：{{ project.backend_architecture_status === "completed" ? "已完成" : project.backend_architecture_status === "in_progress" ? "初始化中" : project.backend_architecture_status === "failed" ? "初始化失败" : "待首次开发" }}
         </div>

@@ -217,6 +217,7 @@ export interface ProjectData {
   memory_enabled?: boolean;
   project_type?: string;
   validation_options?: string[];
+  conda_env_name?: string | null;
   publish_enabled?: boolean;
   publish_auto_create_remote?: boolean;
   publish_remote_name?: string;

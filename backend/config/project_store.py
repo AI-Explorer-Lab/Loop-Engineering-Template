@@ -160,6 +160,7 @@ def default_project_validation() -> dict[str, Any]:
 def validation_for_project(
     project_type: str,
     selected_options: list[str] | None = None,
+    python_env_name: str | None = None,
 ) -> dict[str, Any]:
     """Build a trusted validation profile from project type and known options."""
 
@@ -200,10 +201,32 @@ def validation_for_project(
         dependency_paths.extend(definition.get("dependency_paths", []))
         preflight.extend(definition.get("preflight", []))
         if "test_group" in definition:
-            test_groups.append(definition["test_group"])
+            group = dict(definition["test_group"])
+            if option == "python_tests" and python_env_name:
+                group["command"] = [
+                    "conda", "run", "-n", python_env_name,
+                    "pytest", "-q", "{tests}",
+                ]
+            test_groups.append(group)
         full_command = definition.get("full_command")
         if full_command:
-            full_commands.append(full_command)
+            full_commands.append(
+                [
+                    "conda", "run", "-n", python_env_name, "pytest", "-q", "tests"
+                ]
+                if option == "python_tests" and python_env_name
+                else full_command
+            )
+        if option == "python_tests" and python_env_name:
+            preflight.append(
+                {
+                    "command": [
+                        "conda", "run", "-n", python_env_name,
+                        "python", "-c", "import pytest",
+                    ],
+                    "unavailable_message": "项目 Conda 环境或 pytest 不可用",
+                }
+            )
     return {
         "required_paths": list(dict.fromkeys(required_paths)),
         "dependency_paths": list(dict.fromkeys(dependency_paths)),
