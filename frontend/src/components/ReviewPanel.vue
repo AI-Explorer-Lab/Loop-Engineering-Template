@@ -68,30 +68,30 @@ const impactCopy = computed(() => {
   if (!pendingDecision.value) return "";
   if (!props.task.queue_id) {
     return pendingDecision.value === "changes_requested"
-      ? "任务会从当前 Thread 继续修改，原审核记录保持不变。"
+      ? "任务会从当前 Thread 继续修改，原审核记录保持不变"
       : pendingDecision.value === "approved"
-        ? "批准会绑定当前 Diff 和 commit subject，并在任务分支创建一次 commit；不会 merge 或 push。"
-        : "结论会绑定当前 Diff 指纹并写入不可变审核历史。";
+        ? "批准会绑定当前 Diff 和 commit subject，并在任务分支创建一次 commit；不会 merge 或 push"
+        : "结论会绑定当前 Diff 指纹并写入不可变审核历史";
   }
   const labels: Record<ReviewDecision, string> = {
-    approved: "当前子任务将完成，队列会继续执行下一个尚未开始的子任务。",
-    changes_requested: "当前子任务会从同一 Thread 继续修改，队列暂不前进。",
-    rejected: "整个长任务将停止，后续子任务不会自动执行。",
+    approved: "当前子任务将完成，队列会继续执行下一个尚未开始的子任务",
+    changes_requested: "当前子任务会从同一 Thread 继续修改，队列暂不前进",
+    rejected: "整个长任务将停止，后续子任务不会自动执行",
   };
   return labels[pendingDecision.value];
 });
 
 function prepare(decision: ReviewDecision): void {
   if (auditIntegrityInvalid.value) {
-    formError.value = "审计事件记录无效，不能在原任务上继续审核或交付。";
+    formError.value = "审计事件记录无效，不能在原任务上继续审核或交付";
     return;
   }
   if (!reviewer.value.trim()) {
-    formError.value = "请填写审核人。";
+    formError.value = "请填写审核人";
     return;
   }
   if (decision === "approved" && !commitSubject.value.trim()) {
-    formError.value = "批准前请填写 commit subject。";
+    formError.value = "批准前请填写 commit subject";
     return;
   }
   formError.value = "";
@@ -140,11 +140,11 @@ watch(
 
     <div v-if="task.diff_redaction_count > 0" class="callout danger-callout">
       <strong>暂时不能提交审核</strong>
-      <p>Diff 中有 {{ task.diff_redaction_count }} 处疑似敏感信息已被替换，请先移除后重新运行。</p>
+      <p>Diff 中有 {{ task.diff_redaction_count }} 处疑似敏感信息已被替换，请先移除后重新运行</p>
     </div>
     <div v-if="auditIntegrityInvalid" class="callout danger-callout" data-test="audit-integrity-block">
       <strong>审计完整性阻断</strong>
-      <p>原始事件日志存在重复、跳号、倒序或损坏。请保留原任务证据并新建 rerun，不能在这里批准、Commit 或重试 Archive。</p>
+      <p>原始事件日志存在重复、跳号、倒序或损坏。请保留原任务证据并新建 rerun，不能在这里批准、Commit 或重试 Archive</p>
     </div>
 
     <dl class="review-result delivery-state-card">
@@ -158,11 +158,11 @@ watch(
     </dl>
     <div v-if="submitting && !deliveryProgress.visible" class="callout warning-callout" data-test="review-submitting">
       <strong>正在记录审批</strong>
-      <p>审批返回后会继续显示 Commit 与 Archiver 的实际进度。</p>
+      <p>审批返回后会继续显示 Commit 与 Archiver 的实际进度</p>
     </div>
     <div v-if="task.delivery_status === 'failed'" class="callout danger-callout delivery-retry">
       <strong>自动交付未完成</strong>
-      <p>{{ task.last_error_summary || task.commit.error || "可以在不重新生成代码的情况下重试对应检查点。" }}</p>
+      <p>{{ task.last_error_summary || task.commit.error || "可以在不重新生成代码的情况下重试对应检查点" }}</p>
       <button v-if="canRetryCommit" class="secondary-button" type="button" :disabled="submitting || auditIntegrityInvalid" @click="emit('retryCommit')">重试 commit</button>
       <button v-if="canRetryArchive" class="secondary-button" type="button" :disabled="submitting || auditIntegrityInvalid" @click="emit('retryArchive')">重试知识归档</button>
     </div>
@@ -177,10 +177,10 @@ watch(
 
     <form v-else class="review-form" @submit.prevent>
       <label>审核人（本地声明身份）<input v-model="reviewer" data-test="reviewer" :disabled="submitting" /></label>
-      <label>审核说明<textarea v-model="comment" data-test="review-comment" rows="4" :disabled="submitting" placeholder="记录判断依据，方便之后回看。" /></label>
+      <label>审核说明<textarea v-model="comment" data-test="review-comment" rows="4" :disabled="submitting" placeholder="记录判断依据，方便之后回看" /></label>
       <label>Commit subject
         <input v-model="commitSubject" data-test="commit-subject" maxlength="200" :disabled="submitting" />
-        <small>仅在批准时使用；会与当前 Diff 一起绑定。系统不会 merge 或 push。</small>
+        <small>仅在批准时使用；会与当前 Diff 一起绑定。系统不会 merge 或 push</small>
       </label>
       <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
       <div class="review-actions">

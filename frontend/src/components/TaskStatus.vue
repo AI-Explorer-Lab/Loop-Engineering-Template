@@ -134,7 +134,7 @@ function formatTime(value: string | null): string {
 
     <div v-if="task.audit_summary.integrity_status === 'invalid'" class="callout danger-callout">
       <strong>审计日志无效</strong>
-      <p>事件序号或 JSONL 结构不连续。业务状态保持不变，但 Review、Commit 和 Archive 已阻断。</p>
+      <p>事件序号或 JSONL 结构不连续。业务状态保持不变，但 Review、Commit 和 Archive 已阻断</p>
     </div>
     <div v-if="task.history_warning" class="callout warning-callout">
       <strong>历史记录不完整</strong><p>{{ task.history_warning }}</p>
@@ -143,11 +143,11 @@ function formatTime(value: string | null): string {
       <strong>运行环境故障</strong><p>{{ task.infrastructure_error }}</p>
     </div>
     <div v-else-if="task.delivery_status === 'failed'" class="callout danger-callout">
-      <strong>自动交付需要处理</strong><p>{{ task.last_error_summary || "可从审核页重试 commit 或知识归档。" }}</p>
+      <strong>自动交付需要处理</strong><p>{{ task.last_error_summary || "可从审核页重试 commit 或知识归档" }}</p>
     </div>
     <div v-else-if="task.status === 'manual_review'" class="callout warning-callout">
       <strong>机器流程需要人工判断</strong>
-      <p>{{ task.last_error_summary || "代码已连续三轮验证失败。" }}</p>
+      <p>{{ task.last_error_summary || "代码已连续三轮验证失败" }}</p>
     </div>
   </section>
 </template>

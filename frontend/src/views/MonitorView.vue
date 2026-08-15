@@ -85,7 +85,7 @@ async function cancel(): Promise<void> {
         <span class="section-kicker">执行控制台</span>
         <h1>运行监控</h1>
         <p v-if="store.hasRun.value">{{ store.currentTitle.value }}</p>
-        <p v-else>选择一个历史任务，或先创建新的执行。</p>
+        <p v-else>选择一个历史任务，或先创建新的执行</p>
       </div>
       <div v-if="store.hasRun.value" class="header-actions">
         <button v-if="canRecoverRunningTask" class="secondary-button" type="button" :disabled="store.controlling.value" @click="store.runControl('resume')">恢复执行</button>
@@ -100,7 +100,7 @@ async function cancel(): Promise<void> {
     <div v-if="!store.hasRun.value && !store.initializing.value" class="surface empty-state large-empty">
       <span class="empty-orbit"><i /></span>
       <h2>还没有正在查看的任务</h2>
-      <p>创建新任务，或从历史记录中打开一次已有运行。</p>
+      <p>创建新任务，或从历史记录中打开一次已有运行</p>
       <div><RouterLink class="primary-button link-button" to="/create">创建任务</RouterLink><RouterLink class="secondary-button link-button" to="/history">查看历史</RouterLink></div>
     </div>
 
@@ -145,9 +145,9 @@ async function cancel(): Promise<void> {
                 @click="store.selectLog(log.log_id)"
               ><span>{{ log.name }}</span><small>{{ Math.ceil(log.size / 1024) }} KB</small></button>
             </div>
-            <pre class="log-content">{{ store.logContent.value || "选择一份日志查看完整命令输出。" }}</pre>
+            <pre class="log-content">{{ store.logContent.value || "选择一份日志查看完整命令输出" }}</pre>
           </div>
-          <div v-else class="empty-inline">命令完成后，可在这里查看持久化且已脱敏的日志正文。</div>
+          <div v-else class="empty-inline">命令完成后，可在这里查看持久化且已脱敏的日志正文</div>
         </section>
       </div>
 
@@ -163,7 +163,7 @@ async function cancel(): Promise<void> {
       <div class="confirm-dialog" role="dialog" aria-modal="true">
         <span class="dialog-icon danger-dialog-icon">!</span>
         <h3>确认取消这次运行？</h3>
-        <p>系统会在安全检查点停止，不会提交、合并或推送任何代码。</p>
+        <p>系统会在安全检查点停止，不会提交、合并或推送任何代码</p>
         <div class="dialog-actions"><button class="secondary-button" type="button" @click="confirmCancel = false">返回</button><button class="primary-button danger-primary" type="button" @click="cancel">确认取消</button></div>
       </div>
     </div>

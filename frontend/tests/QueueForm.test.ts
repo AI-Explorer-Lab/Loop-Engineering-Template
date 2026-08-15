@@ -46,10 +46,10 @@ describe("QueueForm", () => {
   it("requires a name, a requirement, and acceptance criteria", async () => {
     const wrapper = mount(QueueForm);
     await wrapper.get('[data-test="queue-form"]').trigger("submit");
-    expect(wrapper.get('[role="alert"]').text()).toBe("请填写长任务名称。");
+    expect(wrapper.get('[role="alert"]').text()).toBe("请填写长任务名称");
 
     await wrapper.get('[data-test="queue-name"]').setValue("交易管理");
     await wrapper.get('[data-test="queue-form"]').trigger("submit");
-    expect(wrapper.get('[role="alert"]').text()).toBe("每个子任务都需要填写需求。");
+    expect(wrapper.get('[role="alert"]').text()).toBe("每个子任务都需要填写需求");
   });
 });

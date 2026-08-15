@@ -85,11 +85,11 @@ async function createProject(): Promise<void> {
   const repoPath = projectPath.value.trim();
   const actor = knowledgeActorId.value.trim();
   if (!name || !repoPath || !actor) {
-    projectFormError.value = "请填写项目名称、绝对路径和知识库身份。";
+    projectFormError.value = "请填写项目名称、绝对路径和知识库身份";
     return;
   }
   if (!repoPath.startsWith("/")) {
-    projectFormError.value = "目标路径必须是绝对路径，例如 /Users/mon/Documents/read-notes。";
+    projectFormError.value = "目标路径必须是绝对路径，例如 /Users/mon/Documents/read-notes";
     return;
   }
   projectFormError.value = "";
@@ -103,7 +103,7 @@ async function createProject(): Promise<void> {
   });
   creatingProject.value = false;
   if (!created) {
-    projectFormError.value = store.pageError.value || "项目创建失败。";
+    projectFormError.value = store.pageError.value || "项目创建失败";
     return;
   }
   projectName.value = "";
@@ -121,7 +121,7 @@ async function createProject(): Promise<void> {
       <div>
         <span class="section-kicker">开始一次受控执行</span>
         <h1>创建任务</h1>
-        <p>把需求与验收标准写清楚，Codex 会在隔离工作区中执行并留下完整记录。</p>
+        <p>把需求与验收标准写清楚，Codex 会在隔离工作区中执行并留下完整记录</p>
       </div>
       <div class="project-context-card">
         <span>当前项目</span>
@@ -141,9 +141,9 @@ async function createProject(): Promise<void> {
         <label>项目名称<input v-model="projectName" data-test="create-project-name" :disabled="creatingProject" placeholder="例如：read-notes" /></label>
         <label>绝对路径<input v-model="projectPath" data-test="create-project-path" :disabled="creatingProject" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creatingProject"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
-        <label>知识库身份<input v-model="knowledgeActorId" :disabled="creatingProject" placeholder="例如：zhangsan" /><span class="field-hint">创建时会通过 MCP 校验该身份是否存在于知识库。</span></label>
+        <label>知识库身份<input v-model="knowledgeActorId" :disabled="creatingProject" placeholder="例如：zhangsan" /><span class="field-hint">创建时会通过 MCP 校验该身份是否存在于知识库</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creatingProject || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}<small>{{ item.detail }}</small></span></label></fieldset>
-        <p class="field-hint">知识库默认启用，中期记忆默认读取。全栈项目默认要求后端测试和前端测试；类型检查、生产构建可选。</p>
+        <p class="field-hint">知识库默认启用，中期记忆默认读取。全栈项目默认要求后端测试和前端测试；类型检查、生产构建可选</p>
         <p v-if="projectFormError" class="form-error" role="alert">{{ projectFormError }}</p>
         <div class="button-row"><button class="secondary-button" type="button" :disabled="creatingProject" @click="showProjectForm = false">取消</button><button class="primary-button" type="submit" :disabled="creatingProject">{{ creatingProject ? "正在创建…" : "创建并切换项目" }}</button></div>
       </form>
@@ -183,16 +183,16 @@ async function createProject(): Promise<void> {
         <section class="surface guide-card">
           <span class="guide-index">A</span>
           <h3>先写可观察的结果</h3>
-          <p>验收标准越具体，机器验证越能准确判断改动是否完成。</p>
+          <p>验收标准越具体，机器验证越能准确判断改动是否完成</p>
         </section>
         <section class="surface guide-card">
           <span class="guide-index">B</span>
           <h3>长任务由你决定顺序</h3>
-          <p>手工或自动规划都要由你确认顺序；子任务严格串行，并传递已批准的累计 Diff。</p>
+          <p>手工或自动规划都要由你确认顺序；子任务严格串行，并传递已批准的累计 Diff</p>
         </section>
         <section v-if="store.isRunning.value" class="callout warning-callout">
           <strong>当前项目已有执行中的任务</strong>
-          <p>可以先去监控页暂停、取消或等待它完成。</p>
+          <p>可以先去监控页暂停、取消或等待它完成</p>
           <RouterLink class="inline-link" to="/monitor">打开运行监控 →</RouterLink>
         </section>
       </aside>

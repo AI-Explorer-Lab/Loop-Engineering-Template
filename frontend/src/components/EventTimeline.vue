@@ -159,7 +159,7 @@ function formatTime(value: string): string {
     </div>
     <div v-if="store.eventIntegrity.value?.status === 'invalid'" class="callout danger-callout" role="alert">
       <strong>事件时间线不可信，已停止展示</strong>
-      <p>磁盘中的事件序号或 JSONL 结构不连续；系统不会用 seq 去重来掩盖损坏记录。</p>
+      <p>磁盘中的事件序号或 JSONL 结构不连续；系统不会用 seq 去重来掩盖损坏记录</p>
     </div>
     <template v-else>
       <div v-if="visibleEvents.length" class="event-list">
@@ -176,7 +176,7 @@ function formatTime(value: string): string {
           <time>{{ formatTime(event.timestamp) }}</time>
         </article>
       </div>
-      <div v-else class="empty-inline">正在处理，详细进度会在这里更新。</div>
+      <div v-else class="empty-inline">正在处理，详细进度会在这里更新</div>
       <details v-if="hiddenEvents.length" class="timeline-debug">
         <summary>查看隐藏的内部记录（{{ hiddenEvents.length }} 条）</summary>
         <div class="timeline-debug-list">

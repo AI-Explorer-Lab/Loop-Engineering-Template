@@ -42,11 +42,11 @@ function submit(): void {
   const normalizedRequirement = requirement.value.trim();
   const normalizedCriteria = parseCriteria();
   if (!normalizedRequirement) {
-    validationMessage.value = "请填写功能需求。";
+    validationMessage.value = "请填写功能需求";
     return;
   }
   if (!normalizedCriteria.length) {
-    validationMessage.value = "每条验收标准都需要填写。";
+    validationMessage.value = "每条验收标准都需要填写";
     return;
   }
   validationMessage.value = "";
@@ -74,7 +74,7 @@ function submit(): void {
     <fieldset class="criteria" :disabled="props.disabled">
       <legend>验收标准</legend>
       <p class="field-hint">
-        每行写一条可观察、可验证的结果。按回车会自动生成下一项编号，例如“传入 min_amount=100 时，只返回金额大于或等于 100 的交易”。
+        每行写一条可观察、可验证的结果。按回车会自动生成下一项编号，例如“传入 min_amount=100 时，只返回金额大于或等于 100 的交易”
       </p>
       <textarea
         v-model="criteriaText"

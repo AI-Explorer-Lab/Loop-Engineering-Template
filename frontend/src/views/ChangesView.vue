@@ -30,7 +30,7 @@ function display(value: unknown): string {
 <template>
   <div class="view-stack changes-view">
     <header class="view-header action-header">
-      <div><span class="section-kicker">代码检查台</span><h1>变更</h1><p>逐文件检查 Diff、Codex 可见回复与机器报告。</p></div>
+      <div><span class="section-kicker">代码检查台</span><h1>变更</h1><p>逐文件检查 Diff、Codex 可见回复与机器报告</p></div>
       <div v-if="store.task.value" class="change-summary">
         <span><strong>{{ store.task.value.changed_files.length }}</strong> 个文件</span>
         <span><strong>{{ store.task.value.codex_responses.length }}</strong> 次回复</span>
@@ -38,7 +38,7 @@ function display(value: unknown): string {
     </header>
 
     <div v-if="!store.hasRun.value" class="surface empty-state large-empty">
-      <h2>尚未选择运行记录</h2><p>从监控或历史页打开一次任务后再检查变更。</p>
+      <h2>尚未选择运行记录</h2><p>从监控或历史页打开一次任务后再检查变更</p>
       <RouterLink class="secondary-button link-button" to="/history">打开历史记录</RouterLink>
     </div>
 
@@ -63,7 +63,7 @@ function display(value: unknown): string {
         </div>
         <div v-if="store.task.value?.diff_redaction_count" class="sensitive-warning">
           <strong>当前 Diff 含已替换的疑似敏感信息</strong>
-          <span>审核操作保持禁用；请进入人工审查页查看约束说明。</span>
+          <span>审核操作保持禁用；请进入人工审查页查看约束说明</span>
           <RouterLink to="/review">查看原因 →</RouterLink>
         </div>
         <DiffViewer v-if="tab === 'diff'" :diff="visibleDiff" />
@@ -72,9 +72,9 @@ function display(value: unknown): string {
             <header><strong>第 {{ response.turn_number }} 轮</strong><span>Codex</span></header>
             <pre>{{ response.response }}</pre>
           </article>
-          <div v-if="!store.task.value?.codex_responses.length" class="empty-inline">没有持久化的可见回复。</div>
+          <div v-if="!store.task.value?.codex_responses.length" class="empty-inline">没有持久化的可见回复</div>
         </div>
-        <pre v-else class="report-content">{{ visibleReport || "报告尚未生成。" }}</pre>
+        <pre v-else class="report-content">{{ visibleReport || "报告尚未生成" }}</pre>
       </section>
 
       <nav class="next-step-bar" aria-label="后续步骤">

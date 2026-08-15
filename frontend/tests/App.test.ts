@@ -728,7 +728,7 @@ describe("App workbench", () => {
 
   it("does not invent review data for legacy records", async () => {
     localStorage.setItem("codex-orchestrator:last-task-id", "task-1");
-    taskApi.getTask.mockResolvedValue(task("success", { schema_version: 0, legacy: true, history_warning: "历史记录不完整。", review_status: "unavailable", workspace: {}, permissions: {}, diff_url: null }));
+    taskApi.getTask.mockResolvedValue(task("success", { schema_version: 0, legacy: true, history_warning: "历史记录不完整", review_status: "unavailable", workspace: {}, permissions: {}, diff_url: null }));
     const { wrapper } = await mountAt("/review");
     expect(wrapper.text()).toContain("这是一条旧版记录");
     expect(wrapper.find('[data-test="review-panel"]').exists()).toBe(false);

@@ -51,7 +51,7 @@ async function create(): Promise<void> {
   const repoPath = projectPath.value.trim();
   const actor = knowledgeActorId.value.trim();
   if (!name || !repoPath || !actor) {
-    formError.value = "请填写项目名称、目标路径和知识库身份。";
+    formError.value = "请填写项目名称、目标路径和知识库身份";
     return;
   }
   formError.value = "";
@@ -66,7 +66,7 @@ async function create(): Promise<void> {
   });
   creating.value = false;
   if (!created) {
-    formError.value = store.pageError.value || "项目创建失败。";
+    formError.value = store.pageError.value || "项目创建失败";
     return;
   }
   projectName.value = "";
@@ -80,7 +80,7 @@ async function create(): Promise<void> {
 }
 
 async function remove(project: { project_id: string; name: string }): Promise<void> {
-  if (!window.confirm(`确定删除项目“${project.name}”的登记配置吗？项目目录不会删除。`)) return;
+  if (!window.confirm(`确定删除项目“${project.name}”的登记配置吗？项目目录不会删除`)) return;
   await store.deleteProject(project.project_id);
 }
 </script>
@@ -88,7 +88,7 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
 <template>
   <div class="view-stack projects-view">
     <header class="view-header">
-      <div><span class="section-kicker">本地项目工作区</span><h1>项目</h1><p>每个项目保持独立状态与串行执行；新项目会自动初始化 Git、Harness 项目配置和本地运行隔离。</p></div>
+      <div><span class="section-kicker">本地项目工作区</span><h1>项目</h1><p>每个项目保持独立状态与串行执行；新项目会自动初始化 Git、Harness 项目配置和本地运行隔离</p></div>
       <button class="primary-button" type="button" data-test="new-project" @click="showCreateForm = !showCreateForm">＋ 新建项目</button>
     </header>
     <section v-if="showCreateForm" class="surface project-create-form" data-test="project-create-form">
@@ -97,13 +97,13 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
         <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：read-notes" /></label>
         <label>目标路径<input v-model="projectPath" data-test="project-path" :disabled="creating" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creating"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
-        <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验。</span></label>
+        <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creating || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}</span></label></fieldset>
         <label class="project-architecture-toggle">
           <input v-model="backendArchitectureEnabled" data-test="backend-architecture-enabled" type="checkbox" :disabled="creating" />
-          <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次。</small></span>
+          <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，仅执行一次</small></span>
         </label>
-        <p class="field-hint">后端只接受绝对路径；目标路径必须是尚不存在的新目录。</p>
+        <p class="field-hint">后端只接受绝对路径；目标路径必须是尚不存在的新目录</p>
         <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
         <div class="button-row"><button class="secondary-button" type="button" :disabled="creating" @click="showCreateForm = false">取消</button><button class="primary-button" type="submit" :disabled="creating">{{ creating ? "正在创建…" : "创建并进入项目" }}</button></div>
       </form>
@@ -123,6 +123,6 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
         </div>
       </article>
     </div>
-    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并按项目类型和勾选项保存验证配置；知识库默认启用，中期记忆默认读取。</p></section>
+    <section class="surface configuration-note"><div><span class="section-kicker">创建后的默认行为</span><h2>项目会立即进入允许列表</h2></div><p>后端会创建目录、初始化 Git、写入 <code>.harness/project.json</code> 和 <code>.gitignore</code>，并按项目类型和勾选项保存验证配置；知识库默认启用，中期记忆默认读取</p></section>
   </div>
 </template>

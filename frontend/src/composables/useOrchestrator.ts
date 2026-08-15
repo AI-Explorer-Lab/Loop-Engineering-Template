@@ -466,7 +466,7 @@ export function createOrchestrator() {
             : queue.value!.status,
         )
       ) return;
-      recordError(error, "事件或日志读取失败。");
+      recordError(error, "事件或日志读取失败");
     }
   }
 
@@ -534,7 +534,7 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
-      recordError(error, "任务状态读取失败。");
+      recordError(error, "任务状态读取失败");
       if (currentKind.value === "task") schedulePoll();
     }
   }
@@ -574,7 +574,7 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
-      recordError(error, "长任务状态读取失败。");
+      recordError(error, "长任务状态读取失败");
       if (currentKind.value === "queue") schedulePoll();
     }
   }
@@ -633,7 +633,7 @@ export function createOrchestrator() {
       await selectProject(created.project_id, false);
       return created;
     } catch (error) {
-      recordError(error, "项目创建失败；尚未注册新项目。 ");
+      recordError(error, "项目创建失败；尚未注册新项目");
       return null;
     }
   }
@@ -653,7 +653,7 @@ export function createOrchestrator() {
       }
       return true;
     } catch (error) {
-      recordError(error, "项目配置删除失败；项目目录未删除。 ");
+      recordError(error, "项目配置删除失败；项目目录未删除");
       return false;
     }
   }
@@ -691,7 +691,7 @@ export function createOrchestrator() {
       if (stored) await activateRun(stored.kind, stored.identifier);
       await refreshNotifications();
     } catch (error) {
-      recordError(error, "工作台初始化失败。");
+      recordError(error, "工作台初始化失败");
     } finally {
       initializing.value = false;
     }
@@ -704,7 +704,7 @@ export function createOrchestrator() {
       healthError.value = "";
     } catch (error) {
       health.value = null;
-      healthError.value = messageFrom(error, "后端服务不可用。");
+      healthError.value = messageFrom(error, "后端服务不可用");
     } finally {
       checkingHealth.value = false;
     }
@@ -730,7 +730,7 @@ export function createOrchestrator() {
     }
     harnessError.value = statusError === null
       ? ""
-      : messageFrom(statusError, "Harness 能力状态读取失败。");
+      : messageFrom(statusError, "Harness 能力状态读取失败");
   }
 
   async function generatePlan(payload: PlanCreatePayload): Promise<PlanDraft | null> {
@@ -741,7 +741,7 @@ export function createOrchestrator() {
       plan.value = await createPlan(payload);
       return plan.value;
     } catch (error) {
-      recordError(error, "自动规划草稿生成失败；尚未创建任务或工作区。");
+      recordError(error, "自动规划草稿生成失败；尚未创建任务或工作区");
       return null;
     } finally {
       planning.value = false;
@@ -765,7 +765,7 @@ export function createOrchestrator() {
       await activateRun(result.target_kind, targetId);
       return true;
     } catch (error) {
-      recordError(error, "Plan 确认失败；未启动新的执行。草稿仍可继续修改。");
+      recordError(error, "Plan 确认失败；未启动新的执行。草稿仍可继续修改");
       return false;
     } finally {
       confirmingPlan.value = false;
@@ -785,7 +785,7 @@ export function createOrchestrator() {
       connectEventStream();
       return accepted;
     } catch (error) {
-      recordError(error, "任务提交失败。");
+      recordError(error, "任务提交失败");
       return null;
     } finally {
       submitting.value = false;
@@ -805,7 +805,7 @@ export function createOrchestrator() {
       connectEventStream();
       return accepted;
     } catch (error) {
-      recordError(error, "长任务提交失败。");
+      recordError(error, "长任务提交失败");
       return null;
     } finally {
       submitting.value = false;
@@ -850,7 +850,7 @@ export function createOrchestrator() {
       }
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "运行控制失败。");
+      recordError(error, "运行控制失败");
     } finally {
       controlling.value = false;
     }
@@ -884,7 +884,7 @@ export function createOrchestrator() {
       await refreshNotifications();
       return true;
     } catch (error) {
-      recordError(error, "审查提交失败。");
+      recordError(error, "审查提交失败");
       return false;
     } finally {
       reviewing.value = false;
@@ -911,7 +911,7 @@ export function createOrchestrator() {
         else clearPollTimer();
       }
     } catch (error) {
-      recordError(error, kind === "commit" ? "Commit 重试失败。" : "知识归档重试失败。");
+      recordError(error, kind === "commit" ? "Commit 重试失败" : "知识归档重试失败");
     } finally {
       controlling.value = false;
     }
@@ -930,7 +930,7 @@ export function createOrchestrator() {
       await Promise.all([refreshEventsAndLogs(), refreshProjects()]);
       return true;
     } catch (error) {
-      recordError(error, "GitHub 发布失败。");
+      recordError(error, "GitHub 发布失败");
       return false;
     } finally {
       controlling.value = false;
@@ -948,7 +948,7 @@ export function createOrchestrator() {
       );
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "跳过子任务失败。");
+      recordError(error, "跳过子任务失败");
     } finally {
       controlling.value = false;
     }
@@ -973,7 +973,7 @@ export function createOrchestrator() {
       );
       await refreshEventsAndLogs();
     } catch (error) {
-      recordError(error, "调整子任务顺序失败。");
+      recordError(error, "调整子任务顺序失败");
     } finally {
       controlling.value = false;
     }
@@ -985,7 +985,7 @@ export function createOrchestrator() {
     try {
       logContent.value = await getLog(currentKind.value, identifier.value, logId);
     } catch (error) {
-      recordError(error, "日志正文读取失败。");
+      recordError(error, "日志正文读取失败");
     }
   }
 
@@ -1029,7 +1029,7 @@ export function createOrchestrator() {
       });
       return true;
     } catch (error) {
-      recordError(error, "通知偏好保存失败。");
+      recordError(error, "通知偏好保存失败");
       return false;
     }
   }

@@ -71,17 +71,17 @@ function submit(): void {
     acceptance_criteria: parseCriteria(task.acceptance_criteria_text),
   }));
   if (!normalizedName) {
-    validationMessage.value = "请填写长任务名称。";
+    validationMessage.value = "请填写长任务名称";
     return;
   }
   if (normalizedSubtasks.some((task) => !task.requirement)) {
-    validationMessage.value = "每个子任务都需要填写需求。";
+    validationMessage.value = "每个子任务都需要填写需求";
     return;
   }
   if (
     normalizedSubtasks.some((task) => !task.acceptance_criteria.length)
   ) {
-    validationMessage.value = "每条验收标准都需要填写。";
+    validationMessage.value = "每条验收标准都需要填写";
     return;
   }
   validationMessage.value = "";
@@ -149,7 +149,7 @@ function submit(): void {
 
         <fieldset class="criteria" :disabled="disabled">
           <legend>验收标准</legend>
-          <p class="field-hint">每行一条，按回车自动生成下一项编号。</p>
+          <p class="field-hint">每行一条，按回车自动生成下一项编号</p>
           <textarea
             v-model="subtask.acceptance_criteria_text"
             :data-test="`subtask-${taskIndex}-criteria`"

@@ -24,12 +24,12 @@ describe("TaskForm", () => {
     const wrapper = mount(TaskForm);
 
     await wrapper.get('[data-test="task-form"]').trigger("submit");
-    expect(wrapper.get('[role="alert"]').text()).toBe("请填写功能需求。");
+    expect(wrapper.get('[role="alert"]').text()).toBe("请填写功能需求");
 
     await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     expect(wrapper.get('[role="alert"]').text()).toBe(
-      "每条验收标准都需要填写。",
+      "每条验收标准都需要填写",
     );
     expect(wrapper.emitted("submit")).toBeUndefined();
   });
@@ -41,7 +41,7 @@ describe("TaskForm", () => {
     await wrapper.get('[data-test="criteria"]').setValue("\n");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     expect(wrapper.get('[role="alert"]').text()).toBe(
-      "每条验收标准都需要填写。",
+      "每条验收标准都需要填写",
     );
   });
 

@@ -141,7 +141,7 @@ onUnmounted(() => {
             <span class="notification-dot" /><span><strong>{{ notification.title }}</strong><small>{{ notification.message }}</small><time>{{ formatTime(notification.created_at) }}</time></span>
           </button>
         </div>
-        <div v-else class="empty-inline">{{ store.notificationSettings.value.in_app ? "暂时没有运行提醒。" : "站内通知已关闭，可在设置中重新开启。" }}</div>
+        <div v-else class="empty-inline">{{ store.notificationSettings.value.in_app ? "暂时没有运行提醒" : "站内通知已关闭，可在设置中重新开启" }}</div>
         <RouterLink class="drawer-settings-link" to="/settings" @click="notificationsOpen = false">通知设置 →</RouterLink>
       </aside>
       <div v-if="notificationsOpen" class="drawer-scrim" @click="notificationsOpen = false" />

@@ -49,7 +49,7 @@ watch(
 function generate(): void {
   const normalizedRequirement = requirement.value.trim();
   if (!normalizedRequirement) {
-    formError.value = "请填写完整需求。";
+    formError.value = "请填写完整需求";
     return;
   }
   formError.value = "";
@@ -98,7 +98,7 @@ function confirm(): void {
   if (!edited.value) return;
   const reviewerValue = reviewer.value.trim();
   if (!reviewerValue) {
-    formError.value = "请填写 Plan 确认人。";
+    formError.value = "请填写 Plan 确认人";
     return;
   }
   normalizeSequences();
@@ -109,15 +109,15 @@ function confirm(): void {
     item.source_acceptance_ids = [...new Set(item.source_acceptance_ids)].sort();
   });
   if (!edited.value.name) {
-    formError.value = "Plan 名称不能为空。";
+    formError.value = "Plan 名称不能为空";
     return;
   }
   if (edited.value.subtasks.some((item) => !item.title || !item.requirement_slice)) {
-    formError.value = "每个子任务都需要标题和需求切片。";
+    formError.value = "每个子任务都需要标题和需求切片";
     return;
   }
   if (edited.value.subtasks.some((item) => item.source_acceptance_ids.length === 0)) {
-    formError.value = "每个子任务至少要映射一条原始验收标准。";
+    formError.value = "每个子任务至少要映射一条原始验收标准";
     return;
   }
   if (unassignedAcceptanceIds.value.length) {
@@ -134,14 +134,14 @@ function confirm(): void {
 <template>
   <form v-if="!edited" class="task-form plan-input-form" data-test="plan-form" @submit.prevent="generate">
     <label>完整需求
-      <textarea v-model="requirement" data-test="plan-requirement" :disabled="disabled || planning" placeholder="描述最终结果和明确边界；Codex 会生成验收标准和执行切片。" />
+      <textarea v-model="requirement" data-test="plan-requirement" :disabled="disabled || planning" placeholder="描述最终结果和明确边界；Codex 会生成验收标准和执行切片" />
     </label>
-    <p class="field-hint plan-generation-hint">你只需要描述想要的结果。Codex 会根据需求生成可观察的验收标准，并在执行前展示给你确认。</p>
+    <p class="field-hint plan-generation-hint">你只需要描述想要的结果。Codex 会根据需求生成可观察的验收标准，并在执行前展示给你确认</p>
     <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
     <button class="primary-button" type="submit" data-test="generate-plan" :disabled="disabled || planning">
       {{ planning ? "正在生成草稿…" : "生成 Plan 草稿" }}
     </button>
-    <p class="field-hint">生成草稿不会创建任务、队列、分支或 worktree。</p>
+    <p class="field-hint">生成草稿不会创建任务、队列、分支或 worktree</p>
   </form>
 
   <section v-else class="plan-editor" data-test="plan-preview">
@@ -186,7 +186,7 @@ function confirm(): void {
     <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
     <div class="plan-confirmation-note">
       <strong>确认后才会开始执行</strong>
-      <p>{{ edited.subtasks.length === 1 ? "将创建一个单任务。" : `将按当前顺序创建 ${edited.subtasks.length} 个串行子任务。` }}</p>
+      <p>{{ edited.subtasks.length === 1 ? "将创建一个单任务" : `将按当前顺序创建 ${edited.subtasks.length} 个串行子任务` }}</p>
     </div>
     <button class="primary-button" type="button" data-test="confirm-plan" :disabled="confirming" @click="confirm">
       {{ confirming ? "正在确认并启动…" : "确认 Plan 并开始执行" }}
