@@ -22,6 +22,7 @@ const projectPath = ref("");
 const projectType = ref<"python" | "frontend" | "fullstack">("python");
 const knowledgeActorId = ref("");
 const selectedValidationOptions = ref<string[]>(["python_tests"]);
+const backendArchitectureEnabled = ref(false);
 const projectFormError = ref("");
 const creatingProject = ref(false);
 const disabled = computed(() =>
@@ -100,6 +101,7 @@ async function createProject(): Promise<void> {
     project_type: projectType.value,
     validation_options: selectedValidationOptions.value,
     knowledge_actor_id: actor,
+    backend_architecture_enabled: backendArchitectureEnabled.value,
   });
   creatingProject.value = false;
   if (!created) {
@@ -111,6 +113,7 @@ async function createProject(): Promise<void> {
   knowledgeActorId.value = "";
   projectType.value = "python";
   selectedValidationOptions.value = ["python_tests"];
+  backendArchitectureEnabled.value = false;
   showProjectForm.value = false;
 }
 </script>
@@ -143,6 +146,10 @@ async function createProject(): Promise<void> {
         <label>项目类型<select v-model="projectType" :disabled="creatingProject"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creatingProject" placeholder="例如：zhangsan" /><span class="field-hint">创建时会通过 MCP 校验该身份是否存在于知识库</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creatingProject || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}<small>{{ item.detail }}</small></span></label></fieldset>
+        <label class="project-architecture-toggle">
+          <input v-model="backendArchitectureEnabled" data-test="create-backend-architecture-enabled" type="checkbox" :disabled="creatingProject" />
+          <span><strong>启用后端架构初始化</strong><small>第一次开发时读取 MCP 的 TK-DEC-001，并据此设计后端目录、模块边界和 API；只执行一次</small></span>
+        </label>
         <p class="field-hint">知识库默认启用，中期记忆默认读取。全栈项目默认要求后端测试和前端测试；类型检查、生产构建可选</p>
         <p v-if="projectFormError" class="form-error" role="alert">{{ projectFormError }}</p>
         <div class="button-row"><button class="secondary-button" type="button" :disabled="creatingProject" @click="showProjectForm = false">取消</button><button class="primary-button" type="submit" :disabled="creatingProject">{{ creatingProject ? "正在创建…" : "创建并切换项目" }}</button></div>

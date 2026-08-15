@@ -67,4 +67,36 @@ describe("EventTimeline", () => {
     expect(wrapper.get(".timeline-debug").text()).toContain("codex.item.unknown");
     expect(wrapper.get(".timeline-debug").text()).toContain("internal stream fragment");
   });
+
+  it("groups MCP calls by the following frozen context stage", () => {
+    const wrapper = mount(EventTimeline, {
+      props: {
+        events: [
+          {
+            seq: 1,
+            type: "mcp.tool_completed",
+            timestamp: "2026-08-13T09:08:00+08:00",
+            payload: { tool: "knowledge_catalog", mode: "read" },
+          },
+          {
+            seq: 2,
+            type: "mcp.tool_completed",
+            timestamp: "2026-08-13T09:08:01+08:00",
+            payload: { tool: "knowledge_search", mode: "read" },
+          },
+          {
+            seq: 3,
+            type: "context.assembled",
+            timestamp: "2026-08-13T09:08:02+08:00",
+            payload: { stage: "generation" },
+          },
+        ],
+      },
+    });
+
+    expect(wrapper.findAll(".event-row")).toHaveLength(2);
+    expect(wrapper.get(".event-list").text()).toContain("MCP 知识调用 · generation");
+    expect(wrapper.get(".event-list").text()).toContain("knowledge_catalog 1 次");
+    expect(wrapper.get(".event-list").text()).toContain("knowledge_search 1 次");
+  });
 });
