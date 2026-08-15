@@ -51,12 +51,19 @@ describe("EventTimeline", () => {
             timestamp: "2026-08-13T09:08:02+08:00",
             payload: { data: { delta: "internal stream fragment" } },
           },
+          {
+            seq: 6,
+            type: "backend_architecture.context_bound",
+            timestamp: "2026-08-13T09:08:03+08:00",
+            payload: {},
+          },
         ],
       },
     });
 
-    expect(wrapper.findAll(".event-row")).toHaveLength(3);
+    expect(wrapper.findAll(".event-row")).toHaveLength(4);
     expect(wrapper.findAll(".event-row strong").map((node) => node.text())).toEqual([
+      "后端架构上下文已绑定",
       "代码已更新",
       "测试通过",
       "任务启动",
@@ -95,8 +102,8 @@ describe("EventTimeline", () => {
     });
 
     expect(wrapper.findAll(".event-row")).toHaveLength(2);
-    expect(wrapper.get(".event-list").text()).toContain("MCP 知识调用 · generation");
-    expect(wrapper.get(".event-list").text()).toContain("knowledge_catalog 1 次");
-    expect(wrapper.get(".event-list").text()).toContain("knowledge_search 1 次");
+    expect(wrapper.get(".event-list").text()).toContain("MCP 知识调用 · 生成阶段");
+    expect(wrapper.get(".event-list").text()).toContain("知识目录 1 次");
+    expect(wrapper.get(".event-list").text()).toContain("知识检索 1 次");
   });
 });

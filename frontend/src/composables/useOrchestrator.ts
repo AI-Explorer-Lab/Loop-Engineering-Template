@@ -397,6 +397,20 @@ export function createOrchestrator() {
     writeStorage(kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY, runIdentifier);
   }
 
+  function forgetRun(kind: RunKind, runIdentifier: string): void {
+    const projectId = activeProjectId.value || "default";
+    const stored = readStoredRuns();
+    if (stored[projectId]?.kind === kind && stored[projectId]?.identifier === runIdentifier) {
+      delete stored[projectId];
+      writeStorage(PROJECT_RUNS_STORAGE_KEY, JSON.stringify(stored));
+    }
+    const legacyKey = kind === "task" ? TASK_STORAGE_KEY : QUEUE_STORAGE_KEY;
+    if (readStorage(legacyKey) === runIdentifier) localStorage.removeItem(legacyKey);
+    if (readStorage(LAST_KIND_STORAGE_KEY) === (kind === "task" ? "single" : "queue")) {
+      localStorage.removeItem(LAST_KIND_STORAGE_KEY);
+    }
+  }
+
   async function refreshProjects(): Promise<void> {
     try {
       projects.value = await getProjects();
@@ -534,6 +548,11 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        forgetRun("task", taskId);
+        resetRun();
+        return;
+      }
       recordError(error, "任务状态读取失败");
       if (currentKind.value === "task") schedulePoll();
     }
@@ -574,6 +593,11 @@ export function createOrchestrator() {
         closeEventStream();
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        forgetRun("queue", queueId);
+        resetRun();
+        return;
+      }
       recordError(error, "长任务状态读取失败");
       if (currentKind.value === "queue") schedulePoll();
     }
@@ -676,7 +700,9 @@ export function createOrchestrator() {
       }
       await Promise.all([refreshNotificationSettings(), refreshHarnessStatus()]);
       let stored = selected ? readStoredRuns()[selected] : undefined;
-      if (!stored && selected) {
+      // Keep the old global task keys only for the legacy default project.
+      // A task from another project must never be restored into this project.
+      if (!stored && selected === "default") {
         const legacyKind = readStorage(LAST_KIND_STORAGE_KEY);
         const legacyIdentifier = readStorage(
           legacyKind === "queue" ? QUEUE_STORAGE_KEY : TASK_STORAGE_KEY,
@@ -687,6 +713,11 @@ export function createOrchestrator() {
             identifier: legacyIdentifier,
           };
         }
+      }
+      if (selected && selected !== "default") {
+        localStorage.removeItem(LAST_KIND_STORAGE_KEY);
+        localStorage.removeItem(TASK_STORAGE_KEY);
+        localStorage.removeItem(QUEUE_STORAGE_KEY);
       }
       if (stored) await activateRun(stored.kind, stored.identifier);
       await refreshNotifications();

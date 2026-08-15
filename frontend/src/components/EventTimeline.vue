@@ -27,6 +27,38 @@ const labels: Record<string, string> = {
   "archive.completed": "知识归档完成",
   "review.recorded": "人工审核完成",
   "permission.denied": "操作被阻止",
+  "queue.created": "队列已创建",
+  "subtask.started": "子任务已开始",
+  "subtask.skipped": "子任务已跳过",
+  "subtask.infrastructure_error": "子任务基础设施异常",
+  "queue.reordered": "队列顺序已调整",
+  "command.started": "命令开始执行",
+  "file.changed": "代码已更新",
+  "workspace.created": "工作区已创建",
+  "run.created": "运行记录已创建",
+  "backend_architecture.context_bound": "后端架构上下文已绑定",
+  "backend_architecture.bootstrap_loaded": "后端架构知识已加载",
+  "backend_architecture.bootstrap_reused": "已复用后端架构知识",
+  "context.fixed_assembled": "固定上下文已组装",
+  "knowledge.write_failed": "知识归档失败",
+  "delivery.published": "代码已发布",
+};
+
+const stageLabels: Record<string, string> = {
+  planning: "规划阶段",
+  generation: "生成阶段",
+  validation: "验证阶段",
+  review: "审核阶段",
+  archive: "归档阶段",
+  publish: "发布阶段",
+  other: "其他阶段",
+};
+
+const toolLabels: Record<string, string> = {
+  knowledge_catalog: "知识目录",
+  knowledge_search: "知识检索",
+  knowledge_read: "知识读取",
+  knowledge_write: "知识写入",
 };
 
 function eventType(event: EventRecord): string {
@@ -140,8 +172,7 @@ function title(event: EventRecord): string {
   if (type === "validation.completed") {
     return payloadOf(event).passed === true ? "验证通过" : "验证未通过";
   }
-  if (type === "file.changed") return "代码已更新";
-  return labels[type] || type.replaceAll(".", " · ");
+  return labels[type] || "系统事件";
 }
 
 function summary(event: EventRecord): string {
@@ -183,8 +214,12 @@ function technicalDetails(event: EventRecord): string {
 function mcpSummary(group: McpGroup): string {
   return Object.entries(group.counts)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([tool, count]) => `${tool} ${count} 次`)
+    .map(([tool, count]) => `${toolLabels[tool] || "知识工具"} ${count} 次`)
     .join("、");
+}
+
+function stageLabel(stage: string): string {
+  return stageLabels[stage] || "其他阶段";
 }
 
 function mcpTechnicalDetails(group: McpGroup): string {
@@ -244,7 +279,7 @@ function formatTime(value: string): string {
         <article v-for="group in mcpGroups" :key="`mcp-${group.stage}-${group.firstSeq}`" class="event-row mcp-summary-row">
           <span class="event-marker" />
           <div class="event-copy">
-            <strong>MCP 知识调用 · {{ group.stage }}</strong>
+            <strong>MCP 知识调用 · {{ stageLabel(group.stage) }}</strong>
             <p class="event-summary">已合并 {{ group.events.length }} 条调用：{{ mcpSummary(group) }}</p>
             <details class="event-technical">
               <summary>查看原始 MCP 调用</summary>

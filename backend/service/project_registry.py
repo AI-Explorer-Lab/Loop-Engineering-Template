@@ -282,6 +282,7 @@ class ProjectRegistry:
         queue_workflow_factory = harness.queue_workflow
         tasks = TaskService(
             root,
+            project_name=str(item["name"]),
             validation_timeout_seconds=self._timeout,
             executor=executor,
             workflow_factory=workflow_factory,
@@ -294,6 +295,7 @@ class ProjectRegistry:
         )
         queues = QueueService(
             root,
+            project_name=str(item["name"]),
             validation_timeout_seconds=self._timeout,
             executor=executor,
             workflow_factory=queue_workflow_factory,
