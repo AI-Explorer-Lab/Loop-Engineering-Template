@@ -654,7 +654,16 @@ export function createOrchestrator() {
     try {
       const created = await createProjectRequest(payload);
       projects.value = [...projects.value, created];
-      await selectProject(created.project_id, false);
+      // Project creation is the critical path. Switch immediately after the
+      // POST succeeds; auxiliary status endpoints must not delay the UI.
+      activeProjectId.value = created.project_id;
+      writeStorage(PROJECT_STORAGE_KEY, created.project_id);
+      resetRun();
+      void Promise.all([
+        refreshNotificationSettings(),
+        refreshHarnessStatus(),
+        refreshProjects(),
+      ]);
       return created;
     } catch (error) {
       recordError(error, "项目创建失败；尚未注册新项目");
