@@ -154,6 +154,7 @@ function planDraft(): PlanDraft {
     }],
     unassigned_acceptance_ids: [],
     warnings: [],
+    clarification_questions: [],
     planner_thread_id: "thread-plan",
     created_at: "2026-07-18T08:00:00+08:00",
   };

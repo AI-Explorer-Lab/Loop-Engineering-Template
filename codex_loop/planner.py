@@ -41,7 +41,7 @@ class PlannedSubtask(BaseModel):
 class PlannerRoleOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["ready", "manual_input_required"] = "ready"
+    status: Literal["ready", "manual_input_required", "needs_clarification"] = "ready"
     generated_name: str = Field(default="", max_length=300)
     execution_mode: Literal["single", "queue"]
     subtasks: list[PlannedSubtask] = Field(min_length=1, max_length=50)
@@ -50,6 +50,7 @@ class PlannerRoleOutput(BaseModel):
     )
     unassigned_acceptance_ids: list[str] = Field(default_factory=list, max_length=50)
     warnings: list[str] = Field(default_factory=list, max_length=50)
+    clarification_questions: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_mode(self) -> "PlannerRoleOutput":
@@ -57,6 +58,12 @@ class PlannerRoleOutput(BaseModel):
             raise ValueError("single execution_mode requires exactly one subtask")
         if self.execution_mode == "queue" and len(self.subtasks) < 2:
             raise ValueError("queue execution_mode requires at least two subtasks")
+        if self.status == "needs_clarification" and not self.clarification_questions:
+            raise ValueError("needs_clarification requires clarification_questions")
+        if self.status != "needs_clarification" and self.clarification_questions:
+            raise ValueError(
+                "clarification_questions require needs_clarification status"
+            )
         sequences = [item.sequence for item in self.subtasks]
         if sequences != list(range(1, len(self.subtasks) + 1)):
             raise ValueError("subtask sequences must be continuous and ordered")
@@ -72,11 +79,12 @@ class PlanDraft(BaseModel):
     source_requirement_sha256: str
     context_sha256: str
     acceptance_criteria: dict[str, str]
-    status: Literal["ready", "manual_input_required"] = "ready"
+    status: Literal["ready", "manual_input_required", "needs_clarification"] = "ready"
     execution_mode: Literal["single", "queue"]
     subtasks: list[PlannedSubtask]
     unassigned_acceptance_ids: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    clarification_questions: list[str] = Field(default_factory=list)
     planner_thread_id: str
     created_at: str
 
@@ -89,6 +97,7 @@ class PlanDraft(BaseModel):
                 "subtasks": [item.model_dump() for item in self.subtasks],
                 "unassigned_acceptance_ids": self.unassigned_acceptance_ids,
                 "warnings": self.warnings,
+                "clarification_questions": self.clarification_questions,
             }
         )
         known = set(self.acceptance_criteria)
@@ -108,8 +117,12 @@ class PlanDraft(BaseModel):
             raise ValueError("unassigned_acceptance_ids does not match the mapping")
         if missing and self.status != "manual_input_required":
             raise ValueError("unassigned criteria require manual_input_required")
-        if not missing and self.status != "ready":
-            raise ValueError("a complete plan must have ready status")
+        if self.status == "manual_input_required" and not missing:
+            raise ValueError("manual_input_required requires unassigned criteria")
+        if self.status == "needs_clarification" and not self.clarification_questions:
+            raise ValueError("needs_clarification requires clarification_questions")
+        if not missing and self.status not in {"ready", "needs_clarification"}:
+            raise ValueError("a complete plan must have ready or clarification status")
         return self
 
 
@@ -189,6 +202,12 @@ class PlannerService:
                     "When task_name_mode is generate_from_requirement, return a "
                     "short, concrete task name in generated_name."
                 ),
+                "clarification_questions": (
+                    "If the requirement or acceptance criteria contain an unresolved "
+                    "product, scope, or architecture ambiguity, return 1-5 concrete "
+                    "questions and status=needs_clarification. Do not guess. Otherwise "
+                    "return an empty list."
+                ),
                 "forbidden_fields": ["dependencies"],
                 "context": context.to_dict(),
             },
@@ -231,7 +250,16 @@ class PlannerService:
             for criterion in subtask.source_acceptance_ids
         }
         missing = sorted(set(criteria) - referenced)
-        status = "manual_input_required" if missing else "ready"
+        status = (
+            "needs_clarification"
+            if output.status == "needs_clarification"
+            else "manual_input_required"
+            if missing
+            else "ready"
+        )
+        clarification_questions = list(dict.fromkeys(output.clarification_questions))
+        if status == "needs_clarification" and not clarification_questions:
+            raise ValueError("planner clarification status requires questions")
         warnings = list(output.warnings)
         if sorted(set(output.unassigned_acceptance_ids)) != missing:
             warnings.append("planner unassigned mapping was corrected deterministically")
@@ -246,6 +274,7 @@ class PlannerService:
             subtasks=output.subtasks,
             unassigned_acceptance_ids=missing,
             warnings=list(dict.fromkeys(warnings)),
+            clarification_questions=clarification_questions,
             planner_thread_id=role.thread_id,
             created_at=utc_now_iso(),
         )
@@ -294,7 +323,7 @@ class PlannerService:
         if candidate.acceptance_criteria != original.acceptance_criteria:
             raise ValueError("confirmed plan acceptance criteria cannot change")
         if candidate.status != "ready":
-            raise ValueError("manual_input_required plan cannot be confirmed")
+            raise ValueError("plan requires clarification or manual input before confirmation")
         reviewer_value = str(reviewer).strip()
         if not reviewer_value:
             raise ValueError("plan reviewer must not be blank")

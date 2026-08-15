@@ -120,9 +120,12 @@ function confirm(): void {
     formError.value = "每个子任务至少要映射一条原始验收标准";
     return;
   }
-  if (unassignedAcceptanceIds.value.length) {
+    if (unassignedAcceptanceIds.value.length) {
     formError.value = `仍有未映射的验收标准：${unassignedAcceptanceIds.value.join("、")}`;
     return;
+  }
+  if (edited.value.clarification_questions.length) {
+    edited.value.clarification_questions = [];
   }
   edited.value.status = "ready";
   edited.value.unassigned_acceptance_ids = [];
@@ -155,6 +158,10 @@ function confirm(): void {
       <strong>确认前需要复核</strong>
       <p v-for="warning in edited.warnings" :key="warning">{{ warning }}</p>
       <p v-if="unassignedAcceptanceIds.length">未映射：{{ unassignedAcceptanceIds.join("、") }}</p>
+    </div>
+    <div v-if="edited.clarification_questions.length" class="callout warning-callout">
+      <strong>需要先澄清需求</strong>
+      <p v-for="question in edited.clarification_questions" :key="question">{{ question }}</p>
     </div>
 
     <ol class="plan-subtask-list">

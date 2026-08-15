@@ -1095,7 +1095,10 @@ class OrchestrationWorkflow:
             run_dir / "evaluations" / "aggregate.json",
             aggregate,
         )
-        if bool(aggregate.get("requires_repair")):
+        if bool(aggregate.get("requires_human")):
+            state.pending_evaluation_summary = ""
+            state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
+        elif bool(aggregate.get("requires_repair")):
             summary = json.dumps(
                 aggregate.get("blocking_findings", []),
                 ensure_ascii=False,
@@ -1118,9 +1121,6 @@ class OrchestrationWorkflow:
                     },
                     round_number=round_number,
                 )
-        elif bool(aggregate.get("requires_human")):
-            state.pending_evaluation_summary = ""
-            state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
         else:
             state.pending_evaluation_summary = ""
             state.mark_success(self._safe_git_summary(Path(state.repo_root)))
