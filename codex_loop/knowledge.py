@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from .mcp_client import DEFAULT_MCP_REGISTRY, LocalMcpClient
@@ -18,7 +19,44 @@ STAGE_KNOWLEDGE_TYPES: dict[str, list[str] | None] = {
     "architecture_evaluation": ["decision", "model", "guideline", "pitfall"],
     "archive": ["guideline", "pitfall"],
 }
+STAGE_LAYER_PRIORITY: dict[str, tuple[str, ...]] = {
+    "planner": ("layer1", "layer2", "layer3"),
+    "generation": ("layer1", "layer3", "layer2"),
+    "spec_evaluation": ("layer1", "layer3", "layer2"),
+    "architecture_evaluation": ("layer1", "layer3", "layer2"),
+    "archive": ("layer1", "layer3", "layer2"),
+}
 STRONG_TYPES = {"decision", "guideline", "process"}
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogSnapshot:
+    """One auditable catalog hop in the Layer A -> Layer B route."""
+
+    level: str
+    path: str
+    content_sha256: str
+    layer: str = ""
+    selection_reason: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "level": self.level,
+            "path": self.path,
+            "content_sha256": self.content_sha256,
+            "layer": self.layer,
+            "selection_reason": self.selection_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "CatalogSnapshot":
+        return cls(
+            level=str(data.get("level", "")),
+            path=str(data.get("path", "")),
+            content_sha256=str(data.get("content_sha256", "")),
+            layer=str(data.get("layer", "")),
+            selection_reason=str(data.get("selection_reason", "")),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +153,9 @@ class KnowledgeSelection:
     catalog_sha256: str
     items: tuple[KnowledgeItem, ...] = field(default_factory=tuple)
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    layer_a_catalog: CatalogSnapshot | None = None
+    layer_b_catalogs: tuple[CatalogSnapshot, ...] = field(default_factory=tuple)
+    retrieval_route: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,11 +165,16 @@ class KnowledgeSelection:
             "catalog_sha256": self.catalog_sha256,
             "items": [item.to_dict() for item in self.items],
             "warnings": list(self.warnings),
+            "layer_a_catalog": (
+                None if self.layer_a_catalog is None else self.layer_a_catalog.to_dict()
+            ),
+            "layer_b_catalogs": [item.to_dict() for item in self.layer_b_catalogs],
+            "retrieval_route": [dict(item) for item in self.retrieval_route],
         }
 
 
 class KnowledgeGateway:
-    """Perform the explicit Layer A -> search -> selected entry progression."""
+    """Perform and persist the Layer A -> Layer B -> Layer C progression."""
 
     def __init__(
         self,
@@ -174,9 +220,11 @@ class KnowledgeGateway:
         if stage not in STAGE_KNOWLEDGE_TYPES:
             raise ValueError(f"unsupported knowledge stage: {stage}")
         budget = self.budget(stage)
-        catalog = self.client.call_tool(
-            "knowledge_catalog",
-            {"max_chars": min(20000, budget["max_chars"] // 3)},
+        layer_a, layer_b, route, catalog_paths = self._catalog_route(
+            stage=stage,
+            query=query,
+            actor=actor,
+            budget=budget,
         )
         effective_query = " ".join(
             part for part in [str(query).strip(), " ".join(changed_paths or [])] if part
@@ -188,6 +236,7 @@ class KnowledgeGateway:
                 "actor": str(actor),
                 "project_id": self.project_id,
                 "knowledge_types": STAGE_KNOWLEDGE_TYPES[stage],
+                "catalog_paths": catalog_paths,
                 "max_results": budget["max_entries"],
             },
         )
@@ -242,9 +291,12 @@ class KnowledgeGateway:
                 content=content,
                 content_sha256=str(read["content_sha256"]),
                 selection_reason=(
-                    "lexical match: " + ", ".join(matched_terms)
-                    if matched_terms
-                    else "stage catalog selection"
+                    f"Layer B={self._catalog_for_path(str(result['path']), layer_b)}; "
+                    + (
+                        "lexical match: " + ", ".join(matched_terms)
+                        if matched_terms
+                        else "catalog selection"
+                    )
                 ),
                 stage=stage,
                 match_score=int(result.get("match_score", 0)),
@@ -262,9 +314,12 @@ class KnowledgeGateway:
             stage=stage,
             query=effective_query,
             actor=str(actor),
-            catalog_sha256=str(catalog["content_sha256"]),
+            catalog_sha256=layer_a.content_sha256,
             items=tuple(items),
             warnings=tuple(dict.fromkeys(warnings)),
+            layer_a_catalog=layer_a,
+            layer_b_catalogs=layer_b,
+            retrieval_route=route,
         )
 
     def retrieve_by_id(
@@ -282,9 +337,11 @@ class KnowledgeGateway:
         if not target_id:
             raise ValueError("knowledge_id must not be blank")
         budget = self.budget(stage)
-        catalog = self.client.call_tool(
-            "knowledge_catalog",
-            {"max_chars": min(20000, budget["max_chars"] // 3)},
+        layer_a, layer_b, route, catalog_paths = self._catalog_route(
+            stage=stage,
+            query=target_id,
+            actor=actor,
+            budget=budget,
         )
         searched = self.client.call_tool(
             "knowledge_search",
@@ -293,6 +350,7 @@ class KnowledgeGateway:
                 "actor": str(actor),
                 "project_id": self.project_id,
                 "knowledge_types": STAGE_KNOWLEDGE_TYPES[stage],
+                "catalog_paths": catalog_paths,
                 "max_results": budget["max_entries"],
             },
         )
@@ -354,10 +412,136 @@ class KnowledgeGateway:
             stage=stage,
             query=f"knowledge_id:{target_id}",
             actor=str(actor),
-            catalog_sha256=str(catalog["content_sha256"]),
+            catalog_sha256=layer_a.content_sha256,
             items=(item,),
             warnings=tuple(warnings),
+            layer_a_catalog=layer_a,
+            layer_b_catalogs=layer_b,
+            retrieval_route=route,
         )
+
+    def _catalog_route(
+        self,
+        *,
+        stage: str,
+        query: str,
+        actor: str,
+        budget: Mapping[str, int],
+    ) -> tuple[CatalogSnapshot, tuple[CatalogSnapshot, ...], tuple[dict[str, Any], ...], list[str]]:
+        layer_a_raw = self.client.call_tool(
+            "knowledge_catalog",
+            {"max_chars": min(20000, int(budget["max_chars"]) // 3)},
+        )
+        layer_a = CatalogSnapshot(
+            level="A",
+            path=str(layer_a_raw.get("path", "knowledge-catalog.md")),
+            content_sha256=str(layer_a_raw["content_sha256"]),
+            layer="A",
+            selection_reason="global knowledge map",
+        )
+        b_paths = self._layer_b_paths(
+            str(layer_a_raw.get("content", "")),
+            layer_a_raw.get("catalog_paths"),
+        )
+        if not b_paths:
+            raise RuntimeError("Layer A knowledge map contains no Layer B catalogs")
+
+        candidates: list[tuple[int, int, str]] = []
+        priority = STAGE_LAYER_PRIORITY[stage]
+        for path in b_paths:
+            layer = self._layer_for_catalog(path)
+            query_score = self._catalog_query_score(query, path, "")
+            layer_rank = priority.index(layer) if layer in priority else len(priority)
+            candidates.append((query_score, -layer_rank, path))
+        candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+
+        selected = candidates[: max(1, int(budget["max_catalogs"]))]
+        layer_b_values: list[CatalogSnapshot] = []
+        for score, _rank, path in selected:
+            raw = self.client.call_tool(
+                "knowledge_catalog",
+                {
+                    "path": path,
+                    "max_chars": min(20000, int(budget["max_chars"]) // 3),
+                },
+            )
+            layer_b_values.append(
+                CatalogSnapshot(
+                    level="B",
+                    path=path,
+                    content_sha256=str(raw["content_sha256"]),
+                    layer=self._layer_for_catalog(path),
+                    selection_reason=(
+                        f"stage={stage}; query_score={score}; "
+                        f"priority={self._layer_for_catalog(path)}"
+                    ),
+                )
+            )
+        layer_b = tuple(layer_b_values)
+        route = (
+            {
+                "from": "layer_a",
+                "to": "layer_b",
+                "path": item.path,
+                "layer": item.layer,
+                "reason": item.selection_reason,
+            }
+            for item in layer_b
+        )
+        return layer_a, layer_b, tuple(route), [item.path for item in layer_b]
+
+    @staticmethod
+    def _layer_b_paths(content: str, catalog_paths: Any = None) -> list[str]:
+        if isinstance(catalog_paths, list):
+            values = [
+                str(path).strip()
+                for path in catalog_paths
+                if str(path).strip()
+                and (
+                    str(path).startswith("tech-wiki/")
+                    or str(path).startswith("biz-wiki/")
+                    or str(path).startswith("docs/knowledge/")
+                )
+            ]
+            if values:
+                return list(dict.fromkeys(values))
+        return list(dict.fromkeys(
+            path
+            for path in re.findall(r"`([^`]+/catalog\.md)`", content)
+            if path != "knowledge-catalog.md"
+            and (
+                path.startswith("tech-wiki/")
+                or path.startswith("biz-wiki/")
+                or path.startswith("docs/knowledge/")
+            )
+        ))
+
+    @staticmethod
+    def _layer_for_catalog(path: str) -> str:
+        if path.startswith("tech-wiki/"):
+            return "layer1"
+        if path.startswith("biz-wiki/"):
+            return "layer2"
+        if path.startswith("docs/knowledge/"):
+            return "layer3"
+        if path.startswith("personal-prefernece/"):
+            return "layer0p"
+        if path.startswith("team-conventions/"):
+            return "layer0t"
+        return "unknown"
+
+    @staticmethod
+    def _catalog_query_score(query: str, path: str, content: str) -> int:
+        haystack = f"{path} {content}".casefold()
+        tokens = set(re.findall(r"[\w.+#/-]+|[\u3400-\u9fff]{2,}", str(query).casefold()))
+        return sum(1 for token in tokens if token and token in haystack)
+
+    @staticmethod
+    def _catalog_for_path(path: str, catalogs: tuple[CatalogSnapshot, ...]) -> str:
+        for catalog in catalogs:
+            if path.startswith(catalog.path.rsplit("/", 1)[0] + "/"):
+                return catalog.path
+        return "unknown"
 
 
 def knowledge_snapshot_sha256(items: list[KnowledgeItem] | tuple[KnowledgeItem, ...]) -> str:
@@ -380,6 +564,8 @@ __all__ = [
     "KnowledgeGateway",
     "KnowledgeItem",
     "KnowledgeSelection",
+    "CatalogSnapshot",
     "STAGE_KNOWLEDGE_TYPES",
+    "STAGE_LAYER_PRIORITY",
     "knowledge_snapshot_sha256",
 ]
