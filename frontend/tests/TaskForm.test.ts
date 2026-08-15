@@ -5,13 +5,13 @@ import TaskForm from "../src/components/TaskForm.vue";
 
 
 describe("TaskForm", () => {
-  it("normalizes one requirement and multiple acceptance criteria", async () => {
+  it("normalizes one requirement and newline-separated acceptance criteria", async () => {
     const wrapper = mount(TaskForm);
 
     await wrapper.get('[data-test="requirement"]').setValue("  Add filtering  ");
-    await wrapper.get('[data-test="criterion-0"]').setValue("  Filters rows  ");
-    await wrapper.get('[data-test="add-criterion"]').trigger("click");
-    await wrapper.get('[data-test="criterion-1"]').setValue("Keeps old behavior");
+    await wrapper.get('[data-test="criteria"]').setValue(
+      "1.  Filters rows  \n2. Keeps old behavior",
+    );
     await wrapper.get('[data-test="task-form"]').trigger("submit");
 
     expect(wrapper.emitted("submit")?.[0]?.[0]).toEqual({
@@ -34,21 +34,26 @@ describe("TaskForm", () => {
     expect(wrapper.emitted("submit")).toBeUndefined();
   });
 
-  it("removes an acceptance criterion while keeping at least one", async () => {
+  it("rejects content without any acceptance criterion", async () => {
     const wrapper = mount(TaskForm);
 
-    await wrapper.get('[data-test="criterion-0"]').setValue("First result");
-    await wrapper.get('[data-test="add-criterion"]').trigger("click");
-    await wrapper.get('[data-test="criterion-1"]').setValue("Second result");
-    await wrapper.get('[aria-label="删除验收标准 1"]').trigger("click");
-
-    expect(wrapper.find('[data-test="criterion-1"]').exists()).toBe(false);
-    expect(wrapper.get('[data-test="criterion-0"]').element).toHaveProperty(
-      "value",
-      "Second result",
+    await wrapper.get('[data-test="requirement"]').setValue("A requirement");
+    await wrapper.get('[data-test="criteria"]').setValue("\n");
+    await wrapper.get('[data-test="task-form"]').trigger("submit");
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      "每条验收标准都需要填写。",
     );
-    expect(
-      wrapper.get('[aria-label="删除验收标准 1"]').attributes("disabled"),
-    ).toBeDefined();
+  });
+
+  it("adds the next markdown number when pressing Enter", async () => {
+    const wrapper = mount(TaskForm);
+    const criteria = wrapper.get('[data-test="criteria"]');
+
+    await criteria.setValue("1. First result");
+    await criteria.trigger("keydown", { key: "Enter" });
+
+    expect((criteria.element as HTMLTextAreaElement).value).toBe(
+      "1. First result\n2. ",
+    );
   });
 });

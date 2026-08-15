@@ -12,7 +12,7 @@ const emit = defineEmits<{
 
 interface EditableSubtask {
   requirement: string;
-  acceptance_criteria: string[];
+  acceptance_criteria_text: string;
 }
 
 const name = ref("");
@@ -20,7 +20,7 @@ const subtasks = ref<EditableSubtask[]>([newSubtask(), newSubtask()]);
 const validationMessage = ref("");
 
 function newSubtask(): EditableSubtask {
-  return { requirement: "", acceptance_criteria: [""] };
+  return { requirement: "", acceptance_criteria_text: "" };
 }
 
 function addSubtask(): void {
@@ -39,21 +39,36 @@ function moveSubtask(index: number, offset: -1 | 1): void {
   subtasks.value.splice(target, 0, item);
 }
 
-function addCriterion(index: number): void {
-  subtasks.value[index].acceptance_criteria.push("");
+function handleCriteriaKeydown(
+  event: KeyboardEvent,
+  taskIndex: number,
+): void {
+  if (event.key !== "Enter") return;
+  const textarea = event.target as HTMLTextAreaElement;
+  const beforeCursor = textarea.value.slice(0, textarea.selectionStart);
+  const nextNumber = beforeCursor.split("\n").length + 1;
+  const afterCursor = textarea.value.slice(textarea.selectionEnd);
+  const nextValue = `${beforeCursor}\n${nextNumber}. ${afterCursor}`;
+  event.preventDefault();
+  subtasks.value[taskIndex].acceptance_criteria_text = nextValue;
+  requestAnimationFrame(() => {
+    const cursor = beforeCursor.length + `\n${nextNumber}. `.length;
+    textarea.setSelectionRange(cursor, cursor);
+  });
 }
 
-function removeCriterion(taskIndex: number, criterionIndex: number): void {
-  const criteria = subtasks.value[taskIndex].acceptance_criteria;
-  if (criteria.length <= 1) return;
-  criteria.splice(criterionIndex, 1);
+function parseCriteria(value: string): string[] {
+  return value
+    .split("\n")
+    .map((item) => item.replace(/^\s*\d+[.)、]\s*/, "").trim())
+    .filter(Boolean);
 }
 
 function submit(): void {
   const normalizedName = name.value.trim();
   const normalizedSubtasks = subtasks.value.map((task) => ({
     requirement: task.requirement.trim(),
-    acceptance_criteria: task.acceptance_criteria.map((item) => item.trim()),
+    acceptance_criteria: parseCriteria(task.acceptance_criteria_text),
   }));
   if (!normalizedName) {
     validationMessage.value = "请填写长任务名称。";
@@ -64,9 +79,7 @@ function submit(): void {
     return;
   }
   if (
-    normalizedSubtasks.some((task) =>
-      task.acceptance_criteria.some((criterion) => !criterion),
-    )
+    normalizedSubtasks.some((task) => !task.acceptance_criteria.length)
   ) {
     validationMessage.value = "每条验收标准都需要填写。";
     return;
@@ -136,32 +149,14 @@ function submit(): void {
 
         <fieldset class="criteria" :disabled="disabled">
           <legend>验收标准</legend>
-          <div
-            v-for="(_, criterionIndex) in subtask.acceptance_criteria"
-            :key="criterionIndex"
-            class="criterion-row"
-          >
-            <span class="criterion-index">{{ criterionIndex + 1 }}</span>
-            <input
-              v-model="subtask.acceptance_criteria[criterionIndex]"
-              :data-test="`subtask-${taskIndex}-criterion-${criterionIndex}`"
-              :placeholder="`验收标准 ${criterionIndex + 1}`"
-            />
-            <button
-              type="button"
-              class="icon-button"
-              :disabled="disabled || subtask.acceptance_criteria.length <= 1"
-              :aria-label="`删除子任务 ${taskIndex + 1} 的验收标准 ${criterionIndex + 1}`"
-              @click="removeCriterion(taskIndex, criterionIndex)"
-            >×</button>
-          </div>
-          <button
-            type="button"
-            class="secondary-button"
-            :disabled="disabled"
-            :data-test="`add-subtask-criterion-${taskIndex}`"
-            @click="addCriterion(taskIndex)"
-          >+ 增加验收标准</button>
+          <p class="field-hint">每行一条，按回车自动生成下一项编号。</p>
+          <textarea
+            v-model="subtask.acceptance_criteria_text"
+            :data-test="`subtask-${taskIndex}-criteria`"
+            rows="4"
+            placeholder="1. 新增后可以在列表中看到这条交易"
+            @keydown="handleCriteriaKeydown($event, taskIndex)"
+          />
         </fieldset>
       </article>
     </div>

@@ -216,7 +216,7 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="criteria"]').setValue("1. Filtering works");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     await flushPromises();
 
@@ -251,7 +251,7 @@ describe("App workbench", () => {
     const { wrapper, router } = await mountAt("/create");
 
     await wrapper.get('[data-test="requirement"]').setValue("Add filtering");
-    await wrapper.get('[data-test="criterion-0"]').setValue("Filtering works");
+    await wrapper.get('[data-test="criteria"]').setValue("1. Filtering works");
     await wrapper.get('[data-test="task-form"]').trigger("submit");
     await flushPromises();
 
@@ -327,9 +327,9 @@ describe("App workbench", () => {
     await wrapper.get('[data-test="queue-mode"]').trigger("click");
     await wrapper.get('[data-test="queue-name"]').setValue("交易管理");
     await wrapper.get('[data-test="subtask-requirement-0"]').setValue("新增交易");
-    await wrapper.get('[data-test="subtask-0-criterion-0"]').setValue("可以新增");
+    await wrapper.get('[data-test="subtask-0-criteria"]').setValue("1. 可以新增");
     await wrapper.get('[data-test="subtask-requirement-1"]').setValue("交易列表");
-    await wrapper.get('[data-test="subtask-1-criterion-0"]').setValue("可以查看");
+    await wrapper.get('[data-test="subtask-1-criteria"]').setValue("1. 可以查看");
     await wrapper.get('[data-test="queue-form"]').trigger("submit");
     await flushPromises();
     await vi.advanceTimersByTimeAsync(2_000);
