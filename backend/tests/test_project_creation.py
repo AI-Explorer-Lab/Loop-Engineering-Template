@@ -220,4 +220,33 @@ def test_new_project_rejects_names_that_cannot_bind_to_environment(
         )
 
     assert response.status_code == 400
-    assert "ASCII 字母和数字" in str(response.json())
+    assert "ASCII 字母、数字和连字符" in str(response.json())
+
+
+def test_new_project_accepts_hyphenated_name_and_binds_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    target = tmp_path / "accounting-app"
+    registry_path = tmp_path / "projects.json"
+    config = _config(control_root, registry_path)
+    monkeypatch.setattr(ProjectRegistry, "_validate_knowledge_actor", lambda *_args: None)
+    _stub_environment(monkeypatch)
+
+    with TestClient(create_app(config=config, validate_config=False)) as client:
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "accounting-app",
+                "repo_path": str(target),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["name"] == "accounting-app"
+    assert response.json()["data"]["conda_env_name"] == "loop-project-accounting-app"

@@ -13,7 +13,7 @@ from typing import Sequence
 from ..exceptions.business_exception import ProjectConfigurationError
 
 
-PROJECT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]{1,64}$")
+PROJECT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?$")
 PYTHON_VERSION = "3.12"
 
 
@@ -27,7 +27,7 @@ def validate_project_name(name: str) -> str:
     normalized = str(name).strip()
     if not PROJECT_NAME_PATTERN.fullmatch(normalized):
         raise ProjectConfigurationError(
-            "项目名称只能包含 ASCII 字母和数字，长度为 1-64 个字符"
+            "项目名称只能包含 ASCII 字母、数字和连字符，长度为 1-64 个字符，且不能以连字符开头或结尾"
         )
     return normalized
 

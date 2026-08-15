@@ -90,8 +90,8 @@ async function createProject(): Promise<void> {
     projectFormError.value = "请填写项目名称、绝对路径和知识库身份";
     return;
   }
-  if (!/^[A-Za-z0-9]{1,64}$/.test(name)) {
-    projectFormError.value = "项目名称只能包含英文字母和数字，长度 1-64 位";
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?$/.test(name)) {
+    projectFormError.value = "项目名称只能包含英文字母、数字和 -，长度 1-64 位，且不能以 - 开头或结尾";
     return;
   }
   if (!repoPath.startsWith("/")) {
@@ -146,7 +146,7 @@ async function createProject(): Promise<void> {
           <div><span class="section-kicker">创建本地项目</span><h2>填写项目基础配置</h2></div>
       </div>
       <form class="project-form-grid" @submit.prevent="createProject">
-        <label>项目名称<input v-model="projectName" data-test="create-project-name" :disabled="creatingProject" placeholder="例如：account" /><span class="field-hint">只能使用英文字母和数字，1-64 位；将绑定 Python 环境名</span></label>
+        <label>项目名称<input v-model="projectName" data-test="create-project-name" :disabled="creatingProject" placeholder="例如：account-app" /><span class="field-hint">只能使用英文字母、数字和 -，1-64 位；不能以 - 开头或结尾</span></label>
         <label>绝对路径<input v-model="projectPath" data-test="create-project-path" :disabled="creatingProject" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creatingProject"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creatingProject" placeholder="例如：zhangsan" /><span class="field-hint">创建时会通过 MCP 校验该身份是否存在于知识库</span></label>
