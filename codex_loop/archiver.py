@@ -508,6 +508,11 @@ class ArchiveCoordinator:
         commit_sha: str,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         allowed_sources = set(str(item) for item in packet.get("source_ids", []))
+        for item in packet.get("knowledge_references", []):
+            if not isinstance(item, Mapping) or not item.get("knowledge_id"):
+                continue
+            knowledge_id = str(item["knowledge_id"])
+            allowed_sources.update({knowledge_id, f"knowledge:{knowledge_id}"})
         existing = {
             _normalized_text(" ".join([item.title, item.content]))
             for item in context.knowledge

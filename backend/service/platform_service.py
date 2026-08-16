@@ -70,6 +70,8 @@ class PlatformService:
             "publish_branch": context.publish_branch,
             "backend_architecture_enabled": context.backend_architecture_enabled,
             "workspace_mode": context.workspace_mode,
+            "frontend_port": context.frontend_port,
+            "backend_port": context.backend_port,
             "backend_architecture_knowledge_id": context.backend_architecture_knowledge_id,
             "backend_architecture_status": context.backend_architecture_bootstrap.snapshot().get(
                 "status", "disabled"

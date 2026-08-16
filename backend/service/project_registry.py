@@ -56,6 +56,8 @@ class ProjectContext:
     publish_branch: str
     backend_architecture_enabled: bool
     workspace_mode: str
+    frontend_port: int
+    backend_port: int
     backend_architecture_knowledge_id: str
     backend_architecture_bootstrap: BackendArchitectureBootstrap
     harness: HarnessRuntime
@@ -285,8 +287,8 @@ class ProjectRegistry:
             str(value).strip() for value in item.get("validation_options", [])
         )
         conda_env_name = str(item.get("conda_env_name", "")).strip() or None
-        frontend_port = int(item.get("frontend_port", 8300))
-        backend_port = int(item.get("backend_port", 18300))
+        frontend_port = int(item.get("frontend_port") or 8300)
+        backend_port = int(item.get("backend_port") or 18300)
         backend_architecture_enabled = bool(
             item.get("backend_architecture_enabled", False)
         )
@@ -315,8 +317,6 @@ class ProjectRegistry:
             validation_profile=validation_profile,
             backend_architecture_bootstrap=backend_architecture_bootstrap,
             workspace_mode=str(item.get("workspace_mode", "branch")),
-            frontend_port=frontend_port,
-            backend_port=backend_port,
         )
         workflow_factory = harness.workflow
         queue_workflow_factory = harness.queue_workflow
@@ -360,6 +360,8 @@ class ProjectRegistry:
             publish_branch=publish_branch,
             backend_architecture_enabled=backend_architecture_enabled,
             workspace_mode=str(item.get("workspace_mode", "branch")),
+            frontend_port=frontend_port,
+            backend_port=backend_port,
             backend_architecture_knowledge_id=backend_architecture_knowledge_id,
             backend_architecture_bootstrap=backend_architecture_bootstrap,
             harness=harness,
@@ -373,9 +375,11 @@ class ProjectRegistry:
 
         used_frontend: set[int] = set()
         used_backend: set[int] = set()
-        for context in self._contexts.values():
-            used_frontend.add(int(getattr(context, "frontend_port", 8300)))
-            used_backend.add(int(getattr(context, "backend_port", 18300)))
+        for item in projects_from_settings(self._config):
+            if item.get("frontend_port") is not None:
+                used_frontend.add(int(item["frontend_port"]))
+            if item.get("backend_port") is not None:
+                used_backend.add(int(item["backend_port"]))
         candidate = 8300
         while candidate in used_frontend or candidate + 10000 in used_backend:
             candidate += 1

@@ -76,6 +76,7 @@ class ValidationEvidenceSnapshot(BaseModel):
         default_factory=list, max_length=100
     )
     round_infrastructure_error: str | None = Field(default=None, max_length=4000)
+    deleted_test_paths: list[str] = Field(default_factory=list, max_length=100)
     created_at: str = Field(default_factory=utc_now_iso)
     snapshot_sha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
 
@@ -209,6 +210,10 @@ class ValidationEvidenceSnapshot(BaseModel):
             raise InfrastructureError(
                 "validation evidence round infrastructure error changed"
             )
+        if sorted(set(self.deleted_test_paths)) != sorted(
+            set(validation_round.deleted_test_paths)
+        ):
+            raise InfrastructureError("validation evidence deleted test facts changed")
         if validation_round.passed != (self.status == "pass"):
             raise InfrastructureError(
                 "validation round result conflicts with frozen evidence"
@@ -316,6 +321,7 @@ class ValidationEvidenceSnapshot(BaseModel):
                 if not validation_round.infrastructure_error
                 else redact_sensitive_text(validation_round.infrastructure_error)
             ),
+            deleted_test_paths=sorted(set(validation_round.deleted_test_paths)),
         )
         return cls.model_validate(
             {

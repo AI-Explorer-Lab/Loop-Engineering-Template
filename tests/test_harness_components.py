@@ -488,12 +488,13 @@ def passing_validation_evidence(
 
 def architecture_output(item: KnowledgeItem) -> ArchitectureEvaluationOutput:
     return ArchitectureEvaluationOutput(
-        status="fail",
+        status="repairable",
         findings=[
             ArchitectureFinding(
                 finding_id="ARCH-001",
-                status="fail",
+                status="repairable",
                 rationale="The changed module crosses the documented boundary.",
+                repair_actions=["Keep the changed module behind the documented boundary."],
                 changed_location="src/view.ts:12",
                 knowledge=KnowledgeCitation(
                     knowledge_id=item.knowledge_id,
@@ -639,7 +640,13 @@ def test_architecture_finding_requires_one_exact_changed_file_path() -> None:
     finding = (
         architecture_output(item)
         .findings[0]
-        .model_copy(update={"changed_location": "src/view.ts and src/view.test.ts"})
+        .model_copy(
+            update={
+                "status": "fail",
+                "repair_actions": [],
+                "changed_location": "src/view.ts and src/view.test.ts",
+            }
+        )
     )
     output = ArchitectureEvaluationOutput(
         status="fail",

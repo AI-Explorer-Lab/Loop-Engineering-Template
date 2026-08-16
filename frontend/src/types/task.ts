@@ -230,6 +230,8 @@ export interface ProjectData {
   backend_architecture_status?: string;
   backend_architecture_snapshot_sha256?: string;
   workspace_mode?: "branch" | "worktree";
+  frontend_port?: number;
+  backend_port?: number;
 }
 
 export interface HistoryItemData {

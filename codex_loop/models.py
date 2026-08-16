@@ -736,6 +736,7 @@ class ValidationRound(JsonModel):
     finished_at: str | None = None
     failure_summary: str = ""
     infrastructure_error: str | None = None
+    deleted_test_paths: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.round_number = int(self.round_number)
@@ -774,6 +775,7 @@ class ValidationRound(JsonModel):
             "finished_at": self.finished_at,
             "failure_summary": self.failure_summary,
             "infrastructure_error": self.infrastructure_error,
+            "deleted_test_paths": sorted(set(self.deleted_test_paths)),
         }
 
     @classmethod
@@ -798,6 +800,9 @@ class ValidationRound(JsonModel):
                 None
                 if data.get("infrastructure_error") is None
                 else str(data["infrastructure_error"])
+            ),
+            deleted_test_paths=sorted(
+                {str(path) for path in data.get("deleted_test_paths", [])}
             ),
         )
 

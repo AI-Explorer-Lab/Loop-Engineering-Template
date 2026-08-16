@@ -43,6 +43,8 @@ class ProjectData(BaseModel):
     publish_branch: str = ""
     backend_architecture_enabled: bool = False
     workspace_mode: Literal["branch", "worktree"] = "branch"
+    frontend_port: int = 8300
+    backend_port: int = 18300
     backend_architecture_knowledge_id: str = "TK-DEC-001"
     backend_architecture_status: str = "disabled"
     backend_architecture_snapshot_sha256: str = ""
