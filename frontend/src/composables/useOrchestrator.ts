@@ -33,6 +33,7 @@ import {
   getProjects,
   createProject as createProjectRequest,
   deleteProject as deleteProjectRequest,
+  updateProjectWorkspaceMode as updateProjectWorkspaceModeRequest,
   markNotificationRead,
   updateNotificationSettings,
 } from "../api/platform";
@@ -649,6 +650,7 @@ export function createOrchestrator() {
     validation_options: string[];
     knowledge_actor_id: string;
     backend_architecture_enabled?: boolean;
+    workspace_mode?: "branch" | "worktree";
   }): Promise<ProjectData | null> {
     pageError.value = "";
     try {
@@ -687,6 +689,23 @@ export function createOrchestrator() {
       return true;
     } catch (error) {
       recordError(error, "项目配置删除失败；项目目录未删除");
+      return false;
+    }
+  }
+
+  async function updateProjectWorkspaceMode(
+    projectId: string,
+    workspaceMode: "branch" | "worktree",
+  ): Promise<boolean> {
+    pageError.value = "";
+    try {
+      const updated = await updateProjectWorkspaceModeRequest(projectId, workspaceMode);
+      projects.value = projects.value.map((project) =>
+        project.project_id === projectId ? updated : project,
+      );
+      return true;
+    } catch (error) {
+      recordError(error, "项目工作区模式更新失败");
       return false;
     }
   }
@@ -1142,6 +1161,7 @@ export function createOrchestrator() {
     selectProject,
     createProject,
     deleteProject,
+    updateProjectWorkspaceMode,
     refreshCurrent,
     refreshEventsAndLogs,
     submitTask,

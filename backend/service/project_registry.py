@@ -21,6 +21,7 @@ from ..config.project_store import (
     append_created_project,
     load_created_projects,
     remove_created_project,
+    update_created_project,
     validation_for_project,
 )
 from ..exceptions.business_exception import ProjectConfigurationError, ProjectNotFoundError
@@ -54,6 +55,9 @@ class ProjectContext:
     publish_repository_name: str
     publish_branch: str
     backend_architecture_enabled: bool
+    workspace_mode: str
+    frontend_port: int
+    backend_port: int
     backend_architecture_knowledge_id: str
     backend_architecture_bootstrap: BackendArchitectureBootstrap
     harness: HarnessRuntime
@@ -107,6 +111,7 @@ class ProjectRegistry:
         validation_options: list[str] | None = None,
         knowledge_actor_id: str = "",
         backend_architecture_enabled: bool = False,
+        workspace_mode: str = "branch",
     ) -> ProjectContext:
         """Provision, register, and make available one new project immediately."""
 
@@ -118,8 +123,14 @@ class ProjectRegistry:
         actor = str(knowledge_actor_id).strip()
         if not actor:
             raise ProjectConfigurationError("knowledge_actor_id cannot be blank")
+        normalized_workspace_mode = str(workspace_mode or "branch").strip().lower()
+        if normalized_workspace_mode not in {"branch", "worktree"}:
+            raise ProjectConfigurationError(
+                "workspace_mode must be 'branch' or 'worktree'"
+            )
         self._validate_knowledge_actor(actor)
         project_id = self._new_project_id(normalized_name, path)
+        frontend_port, backend_port = self._next_project_ports()
         initial_validation = self._validation_for_project(
             project_type,
             validation_options,
@@ -131,6 +142,9 @@ class ProjectRegistry:
             project_type=project_type,
             validation_options=validation_options,
             required_paths=initial_validation["required_paths"],
+            backend_architecture_enabled=bool(backend_architecture_enabled),
+            frontend_port=frontend_port,
+            backend_port=backend_port,
             commit_initial_state=False,
         )
         environment = prepare_project_environment(
@@ -159,6 +173,9 @@ class ProjectRegistry:
             "validation_options": list(validation_options or []),
             "conda_env_name": environment.conda_env_name,
             "backend_architecture_enabled": bool(backend_architecture_enabled),
+            "workspace_mode": normalized_workspace_mode,
+            "frontend_port": frontend_port,
+            "backend_port": backend_port,
             "backend_architecture_knowledge_id": BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
             "publish": {
                 "auto_create_remote": True,
@@ -202,6 +219,25 @@ class ProjectRegistry:
         remove_created_project(self._config, context.project_id)
         context.task_service.close(wait=True)
         self._contexts.pop(context.project_id, None)
+
+    def update_workspace_mode(self, project_id: str, workspace_mode: str) -> ProjectContext:
+        context = self.get(project_id)
+        if context.task_service.executor.active_task_id() is not None:
+            raise ProjectConfigurationError("cannot change workspace mode while a task is running")
+        mode = str(workspace_mode or "").strip().lower()
+        if mode not in {"branch", "worktree"}:
+            raise ProjectConfigurationError("workspace_mode must be 'branch' or 'worktree'")
+        registered = load_created_projects(self._config)
+        if not any(str(item.get("id", "")).strip() == context.project_id for item in registered):
+            raise ProjectConfigurationError("only projects created from the web can be updated")
+        item = next(dict(item) for item in registered if str(item.get("id", "")).strip() == context.project_id)
+        item["workspace_mode"] = mode
+        item["validation_profile"] = ValidationProfile.from_mapping(item["validation"])
+        context.task_service.close(wait=True)
+        update_created_project(self._config, context.project_id, {"workspace_mode": mode})
+        rebuilt = self._build_context(item)
+        self._contexts[context.project_id] = rebuilt
+        return rebuilt
 
     def _validate_knowledge_actor(self, actor: str) -> None:
         registry_path = str(self._knowledge.get("mcp_registry", "")).strip()
@@ -251,6 +287,8 @@ class ProjectRegistry:
             str(value).strip() for value in item.get("validation_options", [])
         )
         conda_env_name = str(item.get("conda_env_name", "")).strip() or None
+        frontend_port = int(item.get("frontend_port") or 8300)
+        backend_port = int(item.get("backend_port") or 18300)
         backend_architecture_enabled = bool(
             item.get("backend_architecture_enabled", False)
         )
@@ -264,6 +302,7 @@ class ProjectRegistry:
             root,
             enabled=backend_architecture_enabled,
             knowledge_id=backend_architecture_knowledge_id,
+            project_name=str(item["name"]),
         )
         harness = HarnessRuntime(
             root,
@@ -277,6 +316,7 @@ class ProjectRegistry:
             validation_timeout_seconds=self._timeout,
             validation_profile=validation_profile,
             backend_architecture_bootstrap=backend_architecture_bootstrap,
+            workspace_mode=str(item.get("workspace_mode", "branch")),
         )
         workflow_factory = harness.workflow
         queue_workflow_factory = harness.queue_workflow
@@ -319,6 +359,9 @@ class ProjectRegistry:
             publish_repository_name=publish_repository_name,
             publish_branch=publish_branch,
             backend_architecture_enabled=backend_architecture_enabled,
+            workspace_mode=str(item.get("workspace_mode", "branch")),
+            frontend_port=frontend_port,
+            backend_port=backend_port,
             backend_architecture_knowledge_id=backend_architecture_knowledge_id,
             backend_architecture_bootstrap=backend_architecture_bootstrap,
             harness=harness,
@@ -326,6 +369,21 @@ class ProjectRegistry:
             queue_service=queues,
             plan_service=plans,
         )
+
+    def _next_project_ports(self) -> tuple[int, int]:
+        """Allocate the next stable frontend/backend port pair."""
+
+        used_frontend: set[int] = set()
+        used_backend: set[int] = set()
+        for item in projects_from_settings(self._config):
+            if item.get("frontend_port") is not None:
+                used_frontend.add(int(item["frontend_port"]))
+            if item.get("backend_port") is not None:
+                used_backend.add(int(item["backend_port"]))
+        candidate = 8300
+        while candidate in used_frontend or candidate + 10000 in used_backend:
+            candidate += 1
+        return candidate, candidate + 10000
 
     def _new_project_id(self, name: str, path: Path) -> str:
         candidate = re.sub(r"[^A-Za-z0-9_-]+", "-", path.name or name).strip("-_")

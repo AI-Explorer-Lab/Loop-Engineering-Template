@@ -135,6 +135,29 @@ def remove_created_project(config: Any, project_id: str) -> dict[str, Any]:
     return removed
 
 
+def update_created_project(config: Any, project_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Update a web-created project registration without touching its directory."""
+
+    normalized_id = str(project_id).strip()
+    path = project_store_path(config)
+    values = load_created_projects(config)
+    updated: dict[str, Any] | None = None
+    result: list[dict[str, Any]] = []
+    for item in values:
+        current = dict(item)
+        if str(current.get("id", "")).strip() == normalized_id:
+            current.update(updates)
+            updated = current
+        result.append(current)
+    if updated is None:
+        raise KeyError(normalized_id)
+    content = json.dumps(
+        redact_sensitive_data(result), ensure_ascii=False, indent=2, sort_keys=True
+    )
+    _atomic_write_text(path, f"{content}\n")
+    return updated
+
+
 def default_project_validation() -> dict[str, Any]:
     """Validation suitable for a newly-created small Python project."""
 

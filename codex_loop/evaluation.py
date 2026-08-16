@@ -155,8 +155,6 @@ class EvaluationCoordinator:
         validation_evidence.verify_hash()
         if validation_evidence.task_id != task.task_id:
             raise InfrastructureError("validation evidence belongs to a different task")
-        if validation_evidence.status != "pass":
-            raise InfrastructureError("evaluation requires passing validation evidence")
         actual_diff_sha256 = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
         if actual_diff_sha256 != validation_evidence.final_diff_sha256:
             raise InfrastructureError(
@@ -209,6 +207,13 @@ class EvaluationCoordinator:
             },
             "evaluation_binding": binding,
             "validation_evidence": validation_evidence.to_dict(),
+            "validation_facts": {
+                "status": validation_evidence.status,
+                "evidence_ids": [
+                    item.evidence_id for item in validation_evidence.commands
+                ],
+                "deleted_test_paths": list(validation_evidence.deleted_test_paths),
+            },
             "changed_files": normalized_files,
             "diff_excerpt": sanitize_for_codex(diff_text, max_chars=24000),
             "frozen_context": context.to_dict(),
@@ -509,7 +514,11 @@ class EvaluationCoordinator:
         for criterion in spec.criteria:
             value = criterion.model_dump(mode="json")
             if criterion.status == "fail":
-                blocking.append({"layer": "specification", **value})
+                if criterion.repair_actions:
+                    blocking.append({"layer": "specification", **value})
+                else:
+                    requires_human = True
+                    warnings.append({"layer": "specification", **value})
             elif criterion.status == "repairable":
                 blocking.append({"layer": "specification", **value})
             elif criterion.status in {"needs_human", "not_evaluated"}:
@@ -526,15 +535,25 @@ class EvaluationCoordinator:
                 and item.constraint_strength == "strong"
                 and bool(finding.changed_location.strip())
             ):
-                blocking.append({"layer": "architecture", **value})
+                if finding.repair_actions:
+                    blocking.append({"layer": "architecture", **value})
+                else:
+                    requires_human = True
+                    warnings.append(
+                        {
+                            "layer": "architecture",
+                            "constraint_strength": item.constraint_strength,
+                            **value,
+                        }
+                    )
             elif (
                 finding.status == "repairable"
                 and item.constraint_strength == "strong"
                 and bool(finding.changed_location.strip())
             ):
                 blocking.append({"layer": "architecture", **value})
-            elif finding.status in {"fail", "needs_human"}:
-                if finding.status == "needs_human":
+            elif finding.status in {"fail", "repairable", "needs_human"}:
+                if finding.status in {"fail", "needs_human"}:
                     requires_human = True
                 warnings.append(
                     {
@@ -567,6 +586,13 @@ class EvaluationCoordinator:
                 }
             )
         evidence_ids = [item.evidence_id for item in validation_evidence.commands]
+        outcome = (
+            "needs_human"
+            if requires_human
+            else "repairable"
+            if blocking
+            else "pass"
+        )
         return {
             "schema_version": 2,
             "validation_round": validation_evidence.validation_round,
@@ -576,17 +602,26 @@ class EvaluationCoordinator:
                 "evidence_path": validation_evidence_path,
             },
             "syntax": {
-                "status": "pass",
+                "status": (
+                    "pass"
+                    if validation_evidence.status == "pass"
+                    else "not_evaluated"
+                ),
                 "source": "frozen validation evidence",
                 "evidence_ids": evidence_ids,
             },
             "logic": {
-                "status": "pass",
+                "status": (
+                    "pass"
+                    if validation_evidence.status == "pass"
+                    else "not_evaluated"
+                ),
                 "source": "frozen validation evidence",
                 "evidence_ids": evidence_ids,
             },
             "specification": {"status": _layer_status(spec.criteria)},
             "architecture": {"status": architecture.status},
+            "outcome": outcome,
             "requires_repair": bool(blocking),
             "requires_human": requires_human,
             "blocking_findings": blocking,
@@ -763,6 +798,8 @@ def verify_aggregate_binding(
         aggregate.get("requires_human"), bool
     ):
         raise InfrastructureError("evaluation aggregate decision fields are invalid")
+    if aggregate.get("outcome") not in {"pass", "repairable", "needs_human"}:
+        raise InfrastructureError("evaluation aggregate outcome is invalid")
     for key in ("blocking_findings", "warnings", "information"):
         if not isinstance(aggregate.get(key), list):
             raise InfrastructureError(f"evaluation aggregate {key} must be an array")
@@ -773,7 +810,7 @@ def verify_aggregate_binding(
     if not isinstance(validation, Mapping):
         raise InfrastructureError("evaluation aggregate has no validation binding")
     if (
-        validation.get("status") != "pass"
+        validation.get("status") not in {"pass", "fail", "infra_error"}
         or validation.get("evidence_path") != evidence_path
         or validation.get("evidence_ids") != evidence_ids
     ):

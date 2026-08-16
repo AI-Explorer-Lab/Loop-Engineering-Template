@@ -68,15 +68,31 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
                 "knowledge_actor_id": "zhangsan",
             },
         )
+        second_response = client.post(
+            "/api/projects",
+            json={
+                "name": "ReadingNotesTwo",
+                "repo_path": str(tmp_path / "read-notes-two"),
+                "project_type": "python",
+                "validation_options": ["python_tests"],
+                "knowledge_actor_id": "zhangsan",
+            },
+        )
         projects = client.get("/api/projects")
 
     assert response.status_code == 201
+    assert second_response.status_code == 201
+    assert second_response.json()["data"]["frontend_port"] == 8301
+    assert second_response.json()["data"]["backend_port"] == 18301
     created = response.json()["data"]
     assert created["project_id"] == "read-notes"
     assert created["repo_root"] == str(target)
     assert created["publish_auto_create_remote"] is True
     assert (target / ".gitignore").is_file()
-    assert ".codex-runtime/" in (target / ".gitignore").read_text(encoding="utf-8")
+    project_gitignore = (target / ".gitignore").read_text(encoding="utf-8")
+    assert ".codex-runtime/" in project_gitignore
+    assert "node_modules/" in project_gitignore
+    assert "dist/" in project_gitignore
     harness_config = target / ".harness" / "project.json"
     assert harness_config.is_file()
     assert ".harness/" not in (target / ".gitignore").read_text(encoding="utf-8")
@@ -91,6 +107,9 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     assert (target / ".git").is_dir()
     assert (target / "tests" / "__init__.py").is_file()
     assert (target / "tests" / "test_smoke.py").is_file()
+    assert (target / "start.sh").is_file()
+    assert (target / "start.sh").stat().st_mode & 0o111
+    assert "BACKEND_PORT=\"${BACKEND_PORT:-18300}\"" in (target / "start.sh").read_text(encoding="utf-8")
     assert subprocess.run(
         ["git", "-C", str(target), "branch", "--show-current"],
         capture_output=True,
@@ -155,6 +174,21 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
     assert created["backend_architecture_enabled"] is True
     assert created["backend_architecture_knowledge_id"] == "TK-DEC-001"
     assert created["backend_architecture_status"] == "pending"
+    assert created["frontend_port"] == 8300
+    assert created["backend_port"] == 18300
+    assert (target / "backend" / "main.py").is_file()
+    assert (target / "backend" / "controller" / "dailyjournal_api.py").is_file()
+    assert (target / "backend" / "service" / "dailyjournal_service.py").is_file()
+    assert (target / "backend" / "mapper" / "__init__.py").is_file()
+    assert (target / "backend" / "utils" / "__init__.py").is_file()
+    assert (target / "backend" / "requirements.txt").is_file()
+    assert "-r backend/requirements.txt" in (target / "requirements.txt").read_text(encoding="utf-8")
+    assert "fastapi" in (target / "backend" / "requirements.txt").read_text(encoding="utf-8")
+    start_script = (target / "start.sh").read_text(encoding="utf-8")
+    assert 'FRONTEND_PORT="${FRONTEND_PORT:-8300}"' in start_script
+    assert 'BACKEND_PORT="${BACKEND_PORT:-18300}"' in start_script
+    assert not (target / "backend" / "mapper" / "database_entity.py").exists()
+    assert not (target / "backend" / "utils" / "capability.py").exists()
     stored = json.loads(registry_path.read_text(encoding="utf-8"))
     assert stored[0]["backend_architecture_enabled"] is True
     assert stored[0]["backend_architecture_knowledge_id"] == "TK-DEC-001"

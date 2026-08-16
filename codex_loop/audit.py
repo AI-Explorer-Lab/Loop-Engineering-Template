@@ -592,6 +592,12 @@ class AuditRecorder:
             )
             if not looks_like_path:
                 continue
+            # A sed address script can begin with `/`, but it is a filter
+            # expression rather than a filesystem path.  Do not classify
+            # escaped path-like regexes such as `/^frontend\/dist\//p` as
+            # access outside the task worktree.
+            if word.startswith("/") and "\\/" in word:
+                continue
             expanded = Path(word).expanduser()
             lexical = Path(
                 os.path.abspath(

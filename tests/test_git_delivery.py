@@ -746,6 +746,38 @@ def test_archiver_routes_candidates_without_preallocating_knowledge_ids(
     ]
 
 
+def test_archiver_accepts_frozen_knowledge_reference_as_candidate_source(
+    repository: Path,
+) -> None:
+    coordinator = archive_coordinator(repository, ArchiveRole(), ArchiveClient())
+    candidate = ArchiveCandidate(
+        candidate_type="guideline",
+        title="使用冻结知识作为归档来源",
+        scope="需要保留知识来源的归档流程",
+        problem="归档器只检查任务来源会误判知识来源不存在。",
+        action="同时校验任务来源和本次任务冻结的知识引用。",
+        result="已冻结的知识可以被归档候选正确引用。",
+        target_layer="layer1",
+        layer_reason="该规则可以跨项目复用。",
+        source_ids=["knowledge:TK-GDL-014"],
+        tags=["archive", "knowledge-reference"],
+    )
+
+    values, warnings = coordinator._validated_candidates(
+        [candidate],
+        {
+            "source_ids": ["task:archive-knowledge-source"],
+            "knowledge_references": [{"knowledge_id": "TK-GDL-014"}],
+        },
+        ContextSnapshot(stage="archive", query="archive", actor="zhangsan"),
+        "archive-knowledge-source",
+        "a" * 40,
+    )
+
+    assert warnings == []
+    assert values[0]["source_references"] == ["knowledge:TK-GDL-014"]
+
+
 def test_archive_write_failure_does_not_rollback_commit_and_retries_only_outbox(
     repository: Path,
 ) -> None:

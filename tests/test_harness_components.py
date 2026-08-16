@@ -171,7 +171,9 @@ def test_backend_architecture_bootstrap_reads_fixed_knowledge_once(
         }
     )
     assembler = FixedContextAssembler(snapshot)
-    bootstrap = BackendArchitectureBootstrap(tmp_path, enabled=True)
+    bootstrap = BackendArchitectureBootstrap(
+        tmp_path, enabled=True, project_name="accounting"
+    )
 
     first = bootstrap.prepare(
         task_id="task-1", assembler=assembler, actor="local-user"
@@ -184,6 +186,45 @@ def test_backend_architecture_bootstrap_reads_fixed_knowledge_once(
     assert second is not None
     assert assembler.calls == 1
     assert bootstrap.snapshot()["status"] == "in_progress"
+    assert (tmp_path / "backend" / "main.py").is_file()
+    assert (tmp_path / "backend" / "controller" / "health_api.py").is_file()
+    expected_architecture_paths = {
+        "config/app.yaml",
+        "config/config.py",
+        "constant/enums.py",
+        "constant/values.py",
+        "domain/req.py",
+        "domain/res.py",
+        "domain/models.py",
+        "controller/health_api.py",
+        "controller/accounting_api.py",
+        "service/accounting_service.py",
+        "middlewares/request_logging.py",
+        "middlewares/auth_dependency.py",
+        "middlewares/auth_handler.py",
+        "exceptions/business_exception.py",
+        "exceptions/exception_handler.py",
+        "database/session.py",
+        "database/lifecycle.py",
+        "tests/__init__.py",
+        "main.py",
+        "Dockerfile",
+        "Jenkinsfile",
+        "README.md",
+        ".gitignore",
+        "requirements.txt",
+    }
+    assert all((tmp_path / "backend" / path).is_file() for path in expected_architecture_paths)
+    manifest = json.loads(
+        (tmp_path / "backend" / ".architecture-bootstrap.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["knowledge_id"] == "TK-DEC-001"
+    assert manifest["database_design_enabled"] is False
+    assert (tmp_path / "backend" / "database" / "session.py").read_text(
+        encoding="utf-8"
+    ).find("unconfigured") >= 0
 
     bootstrap.mark_delivered("task-1")
     assert bootstrap.snapshot()["status"] == BOOTSTRAP_COMPLETED
@@ -447,12 +488,13 @@ def passing_validation_evidence(
 
 def architecture_output(item: KnowledgeItem) -> ArchitectureEvaluationOutput:
     return ArchitectureEvaluationOutput(
-        status="fail",
+        status="repairable",
         findings=[
             ArchitectureFinding(
                 finding_id="ARCH-001",
-                status="fail",
+                status="repairable",
                 rationale="The changed module crosses the documented boundary.",
+                repair_actions=["Keep the changed module behind the documented boundary."],
                 changed_location="src/view.ts:12",
                 knowledge=KnowledgeCitation(
                     knowledge_id=item.knowledge_id,
@@ -598,7 +640,13 @@ def test_architecture_finding_requires_one_exact_changed_file_path() -> None:
     finding = (
         architecture_output(item)
         .findings[0]
-        .model_copy(update={"changed_location": "src/view.ts and src/view.test.ts"})
+        .model_copy(
+            update={
+                "status": "fail",
+                "repair_actions": [],
+                "changed_location": "src/view.ts and src/view.test.ts",
+            }
+        )
     )
     output = ArchitectureEvaluationOutput(
         status="fail",

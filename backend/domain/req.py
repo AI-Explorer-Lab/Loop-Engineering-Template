@@ -135,6 +135,7 @@ class ProjectCreateRequest(BaseModel):
     validation_options: list[str] = Field(default_factory=list, max_length=10)
     knowledge_actor_id: str = Field(min_length=1, max_length=100)
     backend_architecture_enabled: bool = False
+    workspace_mode: Literal["branch", "worktree"] = "branch"
 
     @field_validator("name", "repo_path")
     @classmethod
@@ -166,6 +167,10 @@ class ProjectCreateRequest(BaseModel):
         if len(set(normalized)) != len(normalized):
             raise ValueError("validation options must be unique")
         return normalized
+
+
+class ProjectUpdateRequest(BaseModel):
+    workspace_mode: Literal["branch", "worktree"]
 
 
 class QueueVersionRequest(BaseModel):

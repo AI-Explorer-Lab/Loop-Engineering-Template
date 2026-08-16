@@ -261,6 +261,15 @@ def _configured_harness_runtime(
             else agent.get("validation_timeout_seconds", 900)
         ),
         validation_profile=project["validation_profile"],
+        backend_architecture_bootstrap=BackendArchitectureBootstrap(
+            Path(project["repo_root"]),
+            enabled=bool(project.get("backend_architecture_enabled", False)),
+            knowledge_id=str(
+                project.get("backend_architecture_knowledge_id", "TK-DEC-001")
+            ),
+            project_name=str(project.get("name", project.get("project_id", "business"))),
+        ),
+        workspace_mode=str(project.get("workspace_mode", "branch")),
     )
 
 

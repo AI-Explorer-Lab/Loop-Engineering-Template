@@ -13,6 +13,7 @@ const projectType = ref<"python" | "frontend" | "fullstack">("python");
 const knowledgeActorId = ref("");
 const selectedValidationOptions = ref<string[]>(["python_tests"]);
 const backendArchitectureEnabled = ref(true);
+const workspaceMode = ref<"branch" | "worktree">("branch");
 const formError = ref("");
 const creating = ref(false);
 const validationOptions = computed(() => projectType.value === "python"
@@ -68,6 +69,7 @@ async function create(): Promise<void> {
     validation_options: selectedValidationOptions.value,
     knowledge_actor_id: actor,
     backend_architecture_enabled: backendArchitectureEnabled.value,
+    workspace_mode: workspaceMode.value,
   });
   creating.value = false;
   if (!created) {
@@ -80,6 +82,7 @@ async function create(): Promise<void> {
   projectType.value = "python";
   selectedValidationOptions.value = ["python_tests"];
   backendArchitectureEnabled.value = true;
+  workspaceMode.value = "branch";
   showCreateForm.value = false;
   await router.push("/create");
 }
@@ -102,6 +105,7 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
         <label>项目名称<input v-model="projectName" data-test="project-name" :disabled="creating" placeholder="例如：account-app" /><span class="field-hint">只能使用英文字母、数字和 -，1-64 位；不能以 - 开头或结尾</span></label>
         <label>目标路径<input v-model="projectPath" data-test="project-path" :disabled="creating" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creating"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
+        <label>任务工作区模式<select v-model="workspaceMode" :disabled="creating"><option value="branch">默认：项目分支</option><option value="worktree">高级：隔离 worktree</option></select><span class="field-hint">当前项目不支持并行，建议使用项目分支</span></label>
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creating" placeholder="例如：zhangsan" /><span class="field-hint">创建时通过 MCP 校验</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creating || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}</span></label></fieldset>
         <label class="project-architecture-toggle">
@@ -122,6 +126,7 @@ async function remove(project: { project_id: string; name: string }): Promise<vo
           后端架构：{{ project.backend_architecture_status === "completed" ? "已完成" : project.backend_architecture_status === "in_progress" ? "初始化中" : project.backend_architecture_status === "failed" ? "初始化失败" : "待首次开发" }}
         </div>
         <div class="project-runtime"><i :class="{ active: project.active_identifier }" /><span>{{ project.active_identifier ? `运行中 · ${project.active_identifier}` : "当前空闲" }}</span></div>
+        <label class="project-mode-editor">任务工作区模式<select :value="project.workspace_mode || 'branch'" :disabled="Boolean(project.active_identifier)" @change="store.updateProjectWorkspaceMode(project.project_id, ($event.target as HTMLSelectElement).value as 'branch' | 'worktree')"><option value="branch">项目分支（默认）</option><option value="worktree">隔离 worktree（高级）</option></select></label>
         <div class="button-row">
           <button v-if="project.project_id !== store.activeProjectId.value" class="secondary-button" type="button" @click="select(project.project_id)">切换到此项目</button>
           <span v-else class="selected-project-label">✓ 当前项目</span>

@@ -278,6 +278,11 @@ class FakeEvaluationCoordinator:
                     acceptance_id=f"AC-{index:03d}",
                     status=requested_status,
                     rationale=f"Fixture-requested {requested_status} result.",
+                    repair_actions=(
+                        ["Apply the fixture repair action."]
+                        if requested_status == "repairable"
+                        else []
+                    ),
                     validation_evidence_ids=validation_ids,
                     evidence=evidence,
                 )
@@ -584,7 +589,7 @@ def test_blocking_evaluation_reuses_generator_thread_and_frozen_context(
     evaluator = FakeEvaluationCoordinator(
         [
             {
-                "specification": {"status": "fail"},
+                    "specification": {"status": "repairable"},
                 "requires_repair": True,
                 "blocking_findings": [
                     {
@@ -613,7 +618,7 @@ def test_blocking_evaluation_reuses_generator_thread_and_frozen_context(
     assert result.turn_count == 2
     assert client.start_calls == 1
     assert client.resume_calls == []
-    assert "# 独立评估发现" in client.prompts[1]
+    assert "# 需要修复的问题" in client.prompts[1]
     generation = ContextSnapshot.from_dict(
         json.loads(
             (
@@ -630,7 +635,12 @@ def test_blocking_evaluation_reuses_generator_thread_and_frozen_context(
 def test_evaluation_repair_then_latest_validation_failure_projects_fresh_aggregate(
     repo: Path,
 ) -> None:
-    evaluator = FakeEvaluationCoordinator([{"specification": {"status": "fail"}}])
+    evaluator = FakeEvaluationCoordinator(
+        [
+                {"specification": {"status": "repairable"}},
+            {"specification": {"status": "needs_human"}},
+        ]
+    )
     workflow = OrchestrationWorkflow(
         repo,
         client_factory=lambda _root: FakeCodexClient(),
@@ -647,7 +657,7 @@ def test_evaluation_repair_then_latest_validation_failure_projects_fresh_aggrega
     assert result.status is RunStatus.MANUAL_REVIEW
     assert result.infrastructure_error is None
     assert [item.passed for item in result.rounds] == [True, False, False]
-    assert len(evaluator.context_hashes) == 1
+    assert len(evaluator.context_hashes) == 2
     run_dir = StateStore(repo).run_dir("workflow-test")
     first = json.loads(
         (run_dir / "evaluations/round-01/aggregate.json").read_text(encoding="utf-8")
@@ -657,13 +667,13 @@ def test_evaluation_repair_then_latest_validation_failure_projects_fresh_aggrega
     )
     assert first["validation_round"] == 1
     assert first["validation"]["status"] == "pass"
-    assert latest["validation_round"] == 3
+    assert latest["validation_round"] == 2
     assert latest["validation"]["status"] == "fail"
-    assert latest["evaluation_input_sha256"] == ""
-    assert not (run_dir / "evaluations/spec.json").exists()
-    assert not (run_dir / "evaluations/architecture.json").exists()
+    assert latest["evaluation_input_sha256"]
+    assert (run_dir / "evaluations/spec.json").exists()
+    assert (run_dir / "evaluations/architecture.json").exists()
     assert result.artifacts["evaluation_aggregate"] == (
-        "evaluations/round-03/aggregate.json"
+        "evaluations/round-02/aggregate.json"
     )
 
 
@@ -700,8 +710,10 @@ def test_requires_human_evaluation_cannot_be_promoted_to_machine_success(
     assert len(evaluator.context_hashes) == 1
 
 
-def test_failed_validation_rounds_never_call_evaluator(repo: Path) -> None:
-    evaluator = FakeEvaluationCoordinator([])
+def test_failed_validation_rounds_are_sent_to_evaluator(repo: Path) -> None:
+    evaluator = FakeEvaluationCoordinator(
+        [{"specification": {"status": "needs_human"}}]
+    )
     workflow = OrchestrationWorkflow(
         repo,
         client_factory=lambda _root: FakeCodexClient(),
@@ -716,16 +728,15 @@ def test_failed_validation_rounds_never_call_evaluator(repo: Path) -> None:
     result = workflow.start(task())
 
     assert result.status is RunStatus.MANUAL_REVIEW
-    assert evaluator.context_hashes == []
+    assert len(evaluator.context_hashes) == 1
     store = StateStore(repo)
-    assert [
-        store.load_validation_evidence("workflow-test", index).status
-        for index in (1, 2, 3)
-    ] == ["fail", "fail", "fail"]
+    assert store.load_validation_evidence("workflow-test", 1).status == "fail"
 
 
 def test_validation_rejects_a_diff_changed_by_fixed_commands(repo: Path) -> None:
-    evaluator = FakeEvaluationCoordinator([])
+    evaluator = FakeEvaluationCoordinator(
+        [{"specification": {"status": "needs_human"}}]
+    )
 
     class WorkspaceMutatingValidator(FakeValidator):
         def __init__(self, root: Path) -> None:
@@ -1218,7 +1229,9 @@ def test_resume_recovers_diff_change_frozen_during_validation(repo: Path) -> Non
     store.save_validation_evidence(saved_task.task_id, evidence)
     store.save_state(state)
     validator = FakeValidator([])
-    evaluator = FakeEvaluationCoordinator([])
+    evaluator = FakeEvaluationCoordinator(
+        [{"specification": {"status": "needs_human"}}]
+    )
     workflow = OrchestrationWorkflow(
         repo,
         client_factory=lambda _root: FakeCodexClient(),
@@ -1233,7 +1246,7 @@ def test_resume_recovers_diff_change_frozen_during_validation(repo: Path) -> Non
     assert result.status is RunStatus.INFRASTRUCTURE_ERROR
     assert result.infrastructure_error == message
     assert validator.round_numbers == []
-    assert evaluator.context_hashes == []
+    assert len(evaluator.context_hashes) == 1
     assert len(result.rounds) == 1
     assert result.rounds[0].infrastructure_error == message
     aggregate = json.loads(

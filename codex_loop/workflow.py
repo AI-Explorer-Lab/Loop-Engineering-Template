@@ -84,6 +84,7 @@ class OrchestrationWorkflow:
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
         backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
         include_memory: bool = True,
+        workspace_mode: str = "worktree",
     ) -> None:
         self.control_repo_root = Path(repo_root).expanduser().resolve()
         self.repo_root = self.control_repo_root  # compatibility alias
@@ -111,13 +112,16 @@ class OrchestrationWorkflow:
         self.knowledge_actor_id = str(knowledge_actor_id)
         self.backend_architecture_bootstrap = backend_architecture_bootstrap
         self.include_memory = bool(include_memory)
+        self.workspace_mode = str(workspace_mode or "worktree").strip().lower()
         self.validation_profile = (
             validation_profile
             if isinstance(validation_profile, ValidationProfile)
             else ValidationProfile.from_mapping(validation_profile)
         )
         self.workspace_manager = WorkspaceManager(
-            self.control_repo_root, base_ref=base_ref
+            self.control_repo_root,
+            base_ref=base_ref,
+            workspace_mode=self.workspace_mode,
         )
 
     def start(self, task: TaskSpec) -> RunResult:
@@ -703,9 +707,13 @@ class OrchestrationWorkflow:
             },
             round_number=round_number,
         )
-        if evidence.status in {"fail", "infra_error"}:
-            self._project_non_passing_validation(state, evidence)
         state.add_round(validation_round)
+        if (
+            self.evaluation_coordinator is not None
+            and validation_round.infrastructure_error
+        ):
+            state.status = RunStatus.RUNNING
+            state.infrastructure_error = None
         state.active_validation_round = None
         state.validation_start_diff_sha256 = ""
         self.store.save_state(state)
@@ -723,18 +731,22 @@ class OrchestrationWorkflow:
             round_number=round_number,
             redacted=True,
         )
-        if evidence.status == "infra_error":
+        if self.evaluation_coordinator is None and evidence.status in {
+            "fail",
+            "infra_error",
+        }:
+            self._project_non_passing_validation(state, evidence)
+        if self.evaluation_coordinator is not None:
+            state.phase = RunPhase.EVALUATION_PENDING
+            state.pending_prompt_kind = None
+        elif evidence.status == "infra_error":
             raise InfrastructureError(
                 validation_round.infrastructure_error
                 or evidence.round_infrastructure_error
                 or "Fixed validation reported an infrastructure error"
             )
-        if validation_round.passed:
-            if self.evaluation_coordinator is None:
-                state.mark_success(self._safe_git_summary(Path(state.repo_root)))
-            else:
-                state.phase = RunPhase.EVALUATION_PENDING
-                state.pending_prompt_kind = None
+        elif validation_round.passed:
+            state.mark_success(self._safe_git_summary(Path(state.repo_root)))
         elif state.cycle_failure_count >= MAX_VALIDATION_FAILURES:
             state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
         else:
@@ -786,7 +798,10 @@ class OrchestrationWorkflow:
                 raise InfrastructureError(
                     "validation Diff changed without an infrastructure-error snapshot"
                 )
-            if evidence.status in {"fail", "infra_error"}:
+            if (
+                self.evaluation_coordinator is None
+                and evidence.status in {"fail", "infra_error"}
+            ):
                 self._project_non_passing_validation(state, evidence)
             matching = [
                 item for item in state.rounds if item.round_number == active_round
@@ -802,7 +817,13 @@ class OrchestrationWorkflow:
             else:
                 state.add_round(latest)
                 round_added = True
-            if evidence.status == "infra_error":
+                if (
+                    self.evaluation_coordinator is not None
+                    and latest.infrastructure_error
+                ):
+                    state.status = RunStatus.RUNNING
+                    state.infrastructure_error = None
+            if evidence.status == "infra_error" and self.evaluation_coordinator is None:
                 if round_added and not latest.infrastructure_error:
                     state.failure_count = max(0, state.failure_count - 1)
                     state.cycle_failure_count = max(0, state.cycle_failure_count - 1)
@@ -909,9 +930,16 @@ class OrchestrationWorkflow:
                 round_number=round_number,
                 redacted=True,
             )
-        if evidence is not None and evidence.status in {"fail", "infra_error"}:
+        if (
+            self.evaluation_coordinator is None
+            and evidence is not None
+            and evidence.status in {"fail", "infra_error"}
+        ):
             self._project_non_passing_validation(state, evidence)
-        if state.status is RunStatus.INFRASTRUCTURE_ERROR:
+        if (
+            state.status is RunStatus.INFRASTRUCTURE_ERROR
+            and self.evaluation_coordinator is None
+        ):
             return
         if latest.passed and state.phase is RunPhase.VALIDATING:
             if self.evaluation_coordinator is None:
@@ -919,6 +947,10 @@ class OrchestrationWorkflow:
             else:
                 state.phase = RunPhase.EVALUATION_PENDING
                 state.pending_prompt_kind = None
+            self.store.save_state(state)
+        elif self.evaluation_coordinator is not None:
+            state.phase = RunPhase.EVALUATION_PENDING
+            state.pending_prompt_kind = None
             self.store.save_state(state)
         elif not latest.passed and state.cycle_failure_count >= MAX_VALIDATION_FAILURES:
             state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
@@ -957,8 +989,8 @@ class OrchestrationWorkflow:
             state.mark_success(self._safe_git_summary(Path(state.repo_root)))
             self.store.save_state(state)
             return
-        if not state.rounds or not state.rounds[-1].passed:
-            raise InfrastructureError("evaluation requires a passed validation round")
+        if not state.rounds:
+            raise InfrastructureError("evaluation requires a validation round")
         round_number = state.rounds[-1].round_number
         state.phase = RunPhase.EVALUATING
         self.store.save_state(state)
@@ -1005,10 +1037,6 @@ class OrchestrationWorkflow:
             evidence,
             expected_diff_sha256=audit.current_diff_sha256(),
         )
-        if evidence.status != "pass":
-            raise InfrastructureError(
-                "evaluation cannot consume non-passing validation evidence"
-            )
         context = self._assemble_evaluation_context(task, state, audit)
         changed_files = audit.current_changed_files()
         diff_text = audit.current_diff_text()
@@ -1100,13 +1128,16 @@ class OrchestrationWorkflow:
             state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
         elif bool(aggregate.get("requires_repair")):
             summary = json.dumps(
-                aggregate.get("blocking_findings", []),
+                self._compact_evaluation_repairs(
+                    aggregate.get("blocking_findings", [])
+                ),
                 ensure_ascii=False,
                 sort_keys=True,
             )
             state.pending_evaluation_summary = summary
-            state.failure_count += 1
-            state.cycle_failure_count += 1
+            if evidence.status == "pass":
+                state.failure_count += 1
+                state.cycle_failure_count += 1
             if state.cycle_turn_count >= MAX_CODEX_TURNS:
                 state.mark_manual_review(self._safe_git_summary(Path(state.repo_root)))
             else:
@@ -1125,6 +1156,44 @@ class OrchestrationWorkflow:
             state.pending_evaluation_summary = ""
             state.mark_success(self._safe_git_summary(Path(state.repo_root)))
         self.store.save_state(state)
+
+    @staticmethod
+    def _compact_evaluation_repairs(findings: Any) -> list[dict[str, Any]]:
+        """Relay only actionable repair instructions to the Generator."""
+
+        compact: list[dict[str, Any]] = []
+        if not isinstance(findings, list):
+            return compact
+        for finding in findings:
+            if not isinstance(finding, Mapping):
+                continue
+            locations: list[str] = []
+            evidence = finding.get("evidence", [])
+            if isinstance(evidence, list):
+                for item in evidence:
+                    if not isinstance(item, Mapping):
+                        continue
+                    source = str(item.get("source", "")).strip()
+                    location = str(item.get("location", "")).strip()
+                    value = ":".join(part for part in (source, location) if part)
+                    if value and value not in locations:
+                        locations.append(value)
+            changed_location = str(finding.get("changed_location", "")).strip()
+            if changed_location and changed_location not in locations:
+                locations.append(changed_location)
+            actions = finding.get("repair_actions", [])
+            compact.append(
+                {
+                    "acceptance_id": str(finding.get("acceptance_id", "")),
+                    "problem_location": locations,
+                    "problem": str(finding.get("rationale", "")),
+                    "repair_actions": [str(item) for item in actions]
+                    if isinstance(actions, list)
+                    else [],
+                    "allowed_scope": locations,
+                }
+            )
+        return compact
 
     def _assemble_generation_context(
         self,
@@ -1157,6 +1226,7 @@ class OrchestrationWorkflow:
                 task_id=task.task_id,
                 assembler=self.context_assembler,
                 actor=self.knowledge_actor_id,
+                worktree=state.repo_root,
                 event_sink=audit.append,
             )
         generation = self.context_assembler.assemble(
@@ -1203,6 +1273,7 @@ class OrchestrationWorkflow:
                     task_id=task.task_id,
                     assembler=self.context_assembler,
                     actor=self.knowledge_actor_id,
+                    worktree=state.repo_root,
                     event_sink=audit.append,
                 )
         specification = self.context_assembler.assemble(
@@ -1686,7 +1757,7 @@ class OrchestrationWorkflow:
             evidence,
             expected_diff_sha256=state.last_diff_sha256,
         )
-        if evidence.status != "pass":
+        if evidence.status != "pass" and self.evaluation_coordinator is None:
             aggregate = self._load_final_aggregate_with_alias(
                 run_dir,
                 aggregate_path,

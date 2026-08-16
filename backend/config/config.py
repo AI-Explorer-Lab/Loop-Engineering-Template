@@ -135,6 +135,9 @@ def projects_from_settings(config: Any = settings) -> list[dict[str, object]]:
                 "backend_architecture_enabled": bool(
                     item.get("backend_architecture_enabled", False)
                 ),
+                "workspace_mode": str(item.get("workspace_mode", "branch")).strip().lower(),
+                "frontend_port": item.get("frontend_port"),
+                "backend_port": item.get("backend_port"),
                 "backend_architecture_knowledge_id": str(
                     item.get(
                         "backend_architecture_knowledge_id",

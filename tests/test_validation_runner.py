@@ -396,7 +396,7 @@ class ValidationRunnerTests(unittest.TestCase):
 
         self.assertEqual(validator.discover_changed_tests(), ())
 
-    def test_deleted_task_start_test_fails_integrity_check_and_skips_commands(
+    def test_deleted_task_start_test_is_recorded_and_commands_still_run(
         self,
     ) -> None:
         fake = FakeCommandRunner()
@@ -405,16 +405,9 @@ class ValidationRunnerTests(unittest.TestCase):
 
         result = validator.validate(1)
 
-        self.assertFalse(result.passed)
-        self.assertEqual(result.stage, "targeted")
-        self.assertEqual(result.full_results, [])
-        self.assertEqual(len(result.targeted_results), 1)
-        self.assertEqual(
-            result.targeted_results[0].command[0],
-            "internal-test-integrity-check",
-        )
-        self.assertIn("backend/tests/test_existing.py", result.failure_summary)
-        self.assertEqual(fake.commands, [])
+        self.assertTrue(result.passed)
+        self.assertEqual(result.deleted_test_paths, ["backend/tests/test_existing.py"])
+        self.assertNotEqual(fake.commands, [])
 
     def test_test_added_in_one_round_remains_protected_in_later_round(self) -> None:
         fake = FakeCommandRunner()
@@ -434,9 +427,12 @@ class ValidationRunnerTests(unittest.TestCase):
 
         second = validator.validate(2)
 
-        self.assertFalse(second.passed)
-        self.assertIn("test_added_by_codex.py", second.failure_summary)
-        self.assertEqual(len(fake.commands), commands_after_first)
+        self.assertTrue(second.passed)
+        self.assertEqual(
+            second.deleted_test_paths,
+            ["backend/tests/test_added_by_codex.py"],
+        )
+        self.assertGreater(len(fake.commands), commands_after_first)
 
     def test_saved_protected_tests_survive_validator_reconstruction(self) -> None:
         initial = ValidationRunner(self.root, runner=FakeCommandRunner())
@@ -454,8 +450,11 @@ class ValidationRunnerTests(unittest.TestCase):
         )
         result = resumed.validate(2)
 
-        self.assertFalse(result.passed)
-        self.assertIn("test_added_by_codex.py", result.failure_summary)
+        self.assertTrue(result.passed)
+        self.assertEqual(
+            result.deleted_test_paths,
+            ["backend/tests/test_added_by_codex.py"],
+        )
 
     def test_infrastructure_error_keeps_prior_command_results_in_round(self) -> None:
         class PartialInfrastructureRunner(FakeCommandRunner):

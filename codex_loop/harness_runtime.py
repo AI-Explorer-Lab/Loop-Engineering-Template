@@ -38,6 +38,7 @@ class HarnessRuntime:
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
         backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
         include_memory: bool = True,
+        workspace_mode: str = "worktree",
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.project_id = str(project_id)
@@ -52,6 +53,7 @@ class HarnessRuntime:
         )
         self.backend_architecture_bootstrap = backend_architecture_bootstrap
         self.include_memory = bool(include_memory)
+        self.workspace_mode = str(workspace_mode or "worktree").strip().lower()
         self._registry: dict[str, Any] | None = None
 
     def context_assembler(self) -> ContextAssembler:
@@ -89,6 +91,7 @@ class HarnessRuntime:
             validation_profile=self.validation_profile,
             backend_architecture_bootstrap=self.backend_architecture_bootstrap,
             include_memory=self.include_memory,
+            workspace_mode=self.workspace_mode,
         )
 
     def queue_workflow(self) -> QueueWorkflow:

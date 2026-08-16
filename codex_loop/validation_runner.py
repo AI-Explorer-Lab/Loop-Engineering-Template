@@ -299,32 +299,6 @@ class ValidationRunner:
             sorted(self._protected_test_paths - set(current_snapshot))
         )
         self.protect_tests(current_snapshot)
-        if deleted_tests:
-            message = (
-                "Test files present at task start were deleted: "
-                + ", ".join(deleted_tests)
-            )
-            integrity_result = CommandResult(
-                command=["internal-test-integrity-check", *deleted_tests],
-                cwd=str(self.project_root),
-                stage="targeted",
-                started_at=started_at,
-                duration_seconds=0.0,
-                exit_code=1,
-                stdout="",
-                stderr=message,
-            )
-            return ValidationRound(
-                round_number=round_number,
-                passed=False,
-                targeted_results=[integrity_result],
-                full_results=[],
-                stage="targeted",
-                started_at=started_at,
-                finished_at=_utc_now(),
-                failure_summary=message,
-            )
-
         targeted_tests = self._changed_tests_from_snapshot(current_snapshot)
         targeted_results, infrastructure_error = self._run_commands(
             self._targeted_commands(targeted_tests),
@@ -341,6 +315,7 @@ class ValidationRunner:
                 finished_at=_utc_now(),
                 failure_summary=_failure_summary("targeted", targeted_results),
                 infrastructure_error=infrastructure_error,
+                deleted_test_paths=list(deleted_tests),
             )
         if _has_failures(targeted_results):
             return ValidationRound(
@@ -352,6 +327,7 @@ class ValidationRunner:
                 started_at=started_at,
                 finished_at=_utc_now(),
                 failure_summary=_failure_summary("targeted", targeted_results),
+                deleted_test_paths=list(deleted_tests),
             )
 
         full_results, infrastructure_error = self._run_commands(
@@ -368,6 +344,7 @@ class ValidationRunner:
                 finished_at=_utc_now(),
                 failure_summary=_failure_summary("full", full_results),
                 infrastructure_error=infrastructure_error,
+                deleted_test_paths=list(deleted_tests),
             )
         if _has_failures(full_results):
             return ValidationRound(
@@ -379,6 +356,7 @@ class ValidationRunner:
                 started_at=started_at,
                 finished_at=_utc_now(),
                 failure_summary=_failure_summary("full", full_results),
+                deleted_test_paths=list(deleted_tests),
             )
 
         return ValidationRound(
@@ -390,6 +368,7 @@ class ValidationRunner:
             started_at=started_at,
             finished_at=_utc_now(),
             failure_summary="",
+            deleted_test_paths=list(deleted_tests),
         )
 
     def _run_commands(

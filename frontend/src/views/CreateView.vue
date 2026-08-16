@@ -23,6 +23,7 @@ const projectType = ref<"python" | "frontend" | "fullstack">("python");
 const knowledgeActorId = ref("");
 const selectedValidationOptions = ref<string[]>(["python_tests"]);
 const backendArchitectureEnabled = ref(true);
+const workspaceMode = ref<"branch" | "worktree">("branch");
 const projectFormError = ref("");
 const creatingProject = ref(false);
 const disabled = computed(() =>
@@ -107,6 +108,7 @@ async function createProject(): Promise<void> {
     validation_options: selectedValidationOptions.value,
     knowledge_actor_id: actor,
     backend_architecture_enabled: backendArchitectureEnabled.value,
+    workspace_mode: workspaceMode.value,
   });
   creatingProject.value = false;
   if (!created) {
@@ -119,6 +121,7 @@ async function createProject(): Promise<void> {
   projectType.value = "python";
   selectedValidationOptions.value = ["python_tests"];
   backendArchitectureEnabled.value = true;
+  workspaceMode.value = "branch";
   showProjectForm.value = false;
 }
 </script>
@@ -129,7 +132,7 @@ async function createProject(): Promise<void> {
       <div>
         <span class="section-kicker">开始一次受控执行</span>
         <h1>创建任务</h1>
-        <p>把需求与验收标准写清楚，Codex 会在隔离工作区中执行并留下完整记录</p>
+        <p>把需求与验收标准写清楚，Codex 会在项目分支或高级隔离工作区中执行并留下完整记录</p>
       </div>
       <div class="project-context-card">
         <span>当前项目</span>
@@ -149,6 +152,7 @@ async function createProject(): Promise<void> {
         <label>项目名称<input v-model="projectName" data-test="create-project-name" :disabled="creatingProject" placeholder="例如：account-app" /><span class="field-hint">只能使用英文字母、数字和 -，1-64 位；不能以 - 开头或结尾</span></label>
         <label>绝对路径<input v-model="projectPath" data-test="create-project-path" :disabled="creatingProject" placeholder="例如：/Users/mon/Documents/read-notes" /></label>
         <label>项目类型<select v-model="projectType" :disabled="creatingProject"><option value="python">Python / 后端</option><option value="frontend">前端</option><option value="fullstack">全栈</option></select></label>
+        <label>任务工作区模式<select v-model="workspaceMode" :disabled="creatingProject"><option value="branch">默认：项目分支</option><option value="worktree">高级：隔离 worktree</option></select><span class="field-hint">当前项目不支持并行，建议使用项目分支</span></label>
         <label>知识库身份<input v-model="knowledgeActorId" :disabled="creatingProject" placeholder="例如：zhangsan" /><span class="field-hint">创建时会通过 MCP 校验该身份是否存在于知识库</span></label>
         <fieldset class="validation-options"><legend>验证能力</legend><label v-for="item in validationOptions" :key="item.id" class="checkbox-row"><input type="checkbox" :checked="selectedValidationOptions.includes(item.id)" :disabled="creatingProject || item.required" @change="toggleValidationOption(item.id, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label }}{{ item.required ? "（必选）" : "（可选）" }}<small>{{ item.detail }}</small></span></label></fieldset>
         <label class="project-architecture-toggle">
