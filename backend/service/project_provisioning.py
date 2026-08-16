@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from codex_loop.backend_architecture_bootstrap import materialize_backend_scaffold
+
 from ..exceptions.business_exception import BusinessException
 
 
@@ -49,6 +51,7 @@ def provision_git_project(
     project_type: str = "python",
     validation_options: list[str] | None = None,
     required_paths: list[str] | None = None,
+    backend_architecture_enabled: bool = False,
     commit_initial_state: bool = True,
 ) -> None:
     """Create one new Git project with tracked Harness configuration."""
@@ -91,6 +94,11 @@ def provision_git_project(
             project_type=project_type,
             validation_options=validation_options or [],
         )
+        if backend_architecture_enabled:
+            materialize_backend_scaffold(
+                path,
+                project_name=project_name,
+            )
         missing = [
             relative
             for relative in required_paths or []

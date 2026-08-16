@@ -131,6 +131,7 @@ class ProjectRegistry:
             project_type=project_type,
             validation_options=validation_options,
             required_paths=initial_validation["required_paths"],
+            backend_architecture_enabled=bool(backend_architecture_enabled),
             commit_initial_state=False,
         )
         environment = prepare_project_environment(

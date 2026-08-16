@@ -60,6 +60,68 @@ BACKEND_SCAFFOLD_FILES: dict[str, str] = {
 }
 
 
+def backend_scaffold_files(project_name: str) -> dict[str, str]:
+    """Return the fixed scaffold plus project-name-specific business files."""
+
+    business_name = re.sub(r"[^A-Za-z0-9_-]+", "-", str(project_name)).strip("-").lower()
+    if not business_name:
+        raise InfrastructureError("project name cannot produce a backend module name")
+    return {
+        **BACKEND_SCAFFOLD_FILES,
+        f"backend/controller/{business_name}_api.py": (
+            f'"""HTTP endpoints for the {business_name} business module."""\n'
+        ),
+        f"backend/service/{business_name}_service.py": (
+            f'"""Use cases for the {business_name} business module."""\n'
+        ),
+    }
+
+
+def materialize_backend_scaffold(
+    worktree: str | Path,
+    *,
+    project_name: str,
+    knowledge_id: str = BACKEND_ARCHITECTURE_KNOWLEDGE_ID,
+    knowledge_content_sha256: str = "",
+    snapshot_sha256: str = "",
+) -> dict[str, Any]:
+    """Create the source-project backend scaffold without overwriting files."""
+
+    root = Path(worktree).expanduser().resolve()
+    scaffold_files = backend_scaffold_files(project_name)
+    created: list[str] = []
+    for relative, content in scaffold_files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            continue
+        path.write_text(content, encoding="utf-8")
+        created.append(relative)
+    manifest = {
+        "knowledge_id": knowledge_id,
+        "knowledge_content_sha256": knowledge_content_sha256,
+        "snapshot_sha256": snapshot_sha256,
+        "database_design_enabled": False,
+        "database_boundary_files": [
+            "backend/database/session.py",
+            "backend/database/lifecycle.py",
+        ],
+        "files": sorted(scaffold_files),
+    }
+    manifest_path = root / "backend" / ".architecture-bootstrap.json"
+    if not manifest_path.exists():
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        created.append("backend/.architecture-bootstrap.json")
+    return {
+        "knowledge_id": knowledge_id,
+        "snapshot_sha256": snapshot_sha256,
+        "created_paths": created,
+    }
+
+
 @dataclass(slots=True)
 class BackendArchitectureBootstrap:
     """Persist and reuse the first backend-architecture context exactly once."""
@@ -213,27 +275,13 @@ class BackendArchitectureBootstrap:
             raise InfrastructureError(
                 f"backend architecture snapshot does not contain {self.knowledge_id}"
             )
-        backend_root = worktree / "backend"
-        created: list[str] = []
-        business_name = re.sub(r"[^A-Za-z0-9_-]+", "-", self.project_name).strip("-").lower()
-        if not business_name:
-            raise InfrastructureError("project name cannot produce a backend module name")
-        scaffold_files = {
-            **BACKEND_SCAFFOLD_FILES,
-            f"backend/controller/{business_name}_api.py": (
-                f'"""HTTP endpoints for the {business_name} business module."""\n'
-            ),
-            f"backend/service/{business_name}_service.py": (
-                f'"""Use cases for the {business_name} business module."""\n'
-            ),
-        }
-        for relative, content in scaffold_files.items():
-            path = worktree / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists():
-                continue
-            path.write_text(content, encoding="utf-8")
-            created.append(relative)
+        materialized = materialize_backend_scaffold(
+            worktree,
+            project_name=self.project_name,
+            knowledge_id=self.knowledge_id,
+            knowledge_content_sha256=knowledge.content_sha256,
+            snapshot_sha256=snapshot.snapshot_sha256,
+        )
         manifest = {
             "knowledge_id": self.knowledge_id,
             "knowledge_content_sha256": knowledge.content_sha256,
@@ -243,19 +291,10 @@ class BackendArchitectureBootstrap:
                 "backend/database/session.py",
                 "backend/database/lifecycle.py",
             ],
-            "files": sorted(scaffold_files),
+            "files": sorted(backend_scaffold_files(self.project_name)),
         }
-        manifest_path = backend_root / ".architecture-bootstrap.json"
-        if not manifest_path.exists():
-            manifest_path.write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            created.append("backend/.architecture-bootstrap.json")
         return {
-            "knowledge_id": self.knowledge_id,
-            "snapshot_sha256": snapshot.snapshot_sha256,
-            "created_paths": created,
+            **materialized,
             "scaffold_sha256": hashlib.sha256(
                 json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest(),
@@ -338,6 +377,8 @@ class BackendArchitectureBootstrap:
 
 __all__ = [
     "BACKEND_ARCHITECTURE_KNOWLEDGE_ID",
+    "backend_scaffold_files",
+    "materialize_backend_scaffold",
     "BOOTSTRAP_COMPLETED",
     "BOOTSTRAP_DISABLED",
     "BOOTSTRAP_FAILED",

@@ -158,6 +158,13 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
     assert created["backend_architecture_enabled"] is True
     assert created["backend_architecture_knowledge_id"] == "TK-DEC-001"
     assert created["backend_architecture_status"] == "pending"
+    assert (target / "backend" / "main.py").is_file()
+    assert (target / "backend" / "controller" / "dailyjournal_api.py").is_file()
+    assert (target / "backend" / "service" / "dailyjournal_service.py").is_file()
+    assert (target / "backend" / "mapper" / "__init__.py").is_file()
+    assert (target / "backend" / "utils" / "__init__.py").is_file()
+    assert not (target / "backend" / "mapper" / "database_entity.py").exists()
+    assert not (target / "backend" / "utils" / "capability.py").exists()
     stored = json.loads(registry_path.read_text(encoding="utf-8"))
     assert stored[0]["backend_architecture_enabled"] is True
     assert stored[0]["backend_architecture_knowledge_id"] == "TK-DEC-001"
