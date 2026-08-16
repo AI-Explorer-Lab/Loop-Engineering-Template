@@ -25,7 +25,7 @@ BOOTSTRAP_FAILED = "failed"
 
 BACKEND_SCAFFOLD_FILES: dict[str, str] = {
     "backend/__init__.py": '"""Project backend package initialized from TK-DEC-001."""\n',
-    "backend/main.py": '''"""Application entrypoint scaffold; business wiring is added by the task."""\n\n\ndef create_app() -> object:\n    """Return the application instance once the project selects its web framework."""\n\n    raise NotImplementedError("backend application wiring is not implemented yet")\n''',
+    "backend/main.py": '''"""Runnable backend entrypoint; business wiring is added by later tasks."""\n\nfrom fastapi import FastAPI\n\n\napp = FastAPI(title="Project Backend")\n\n\n@app.get("/health")\ndef health() -> dict[str, str]:\n    return {"status": "ok"}\n\n\ndef create_app() -> FastAPI:\n    return app\n''',
     "backend/config/__init__.py": '"""Configuration package."""\n',
     "backend/config/app.yaml": "# Non-sensitive application defaults.\nenvironment: development\n\n# Database design is intentionally not selected by the architecture bootstrap.\ndatabase:\n  enabled: false\n",
     "backend/config/config.py": '''"""Configuration loading boundary for the backend."""\n\n\ndef load_environment(name: str = "development") -> str:\n    return name\n\n\ndef validate_settings() -> None:\n    return None\n''',
@@ -56,7 +56,7 @@ BACKEND_SCAFFOLD_FILES: dict[str, str] = {
     "backend/Jenkinsfile": "// CI pipeline boundary; stages are selected by a later task.\n",
     "backend/README.md": "# Backend architecture scaffold\n\nInitialized from TK-DEC-001. The backend skeleton is created independently of database design. Database files are retained as lifecycle boundaries, but no database, tables, migrations, or persistence configuration are created until a later task explicitly designs them.\n",
     "backend/.gitignore": "__pycache__/\n*.py[cod]\n.env\n",
-    "backend/requirements.txt": "# Dependencies are added when the backend framework is selected.\n",
+    "backend/requirements.txt": "fastapi>=0.115,<1.0\nuvicorn[standard]>=0.34,<1.0\n",
 }
 
 

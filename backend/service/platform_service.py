@@ -69,6 +69,7 @@ class PlatformService:
             "publish_repository_name": context.publish_repository_name,
             "publish_branch": context.publish_branch,
             "backend_architecture_enabled": context.backend_architecture_enabled,
+            "workspace_mode": context.workspace_mode,
             "backend_architecture_knowledge_id": context.backend_architecture_knowledge_id,
             "backend_architecture_status": context.backend_architecture_bootstrap.snapshot().get(
                 "status", "disabled"
@@ -87,6 +88,7 @@ class PlatformService:
         validation_options: list[str] | None = None,
         knowledge_actor_id: str = "",
         backend_architecture_enabled: bool = False,
+        workspace_mode: str = "branch",
     ) -> dict[str, Any]:
         context = self.registry.create_project(
             name=name,
@@ -95,12 +97,18 @@ class PlatformService:
             validation_options=validation_options,
             knowledge_actor_id=knowledge_actor_id,
             backend_architecture_enabled=backend_architecture_enabled,
+            workspace_mode=workspace_mode,
         )
         return self.project_data(context)
 
     def delete_project(self, project_id: str) -> dict[str, str]:
         self.registry.delete_project(project_id)
         return {"project_id": project_id, "message": "项目配置已删除，项目目录未删除"}
+
+    def update_workspace_mode(self, project_id: str, workspace_mode: str) -> dict[str, Any]:
+        return self.project_data(
+            self.registry.update_workspace_mode(project_id, workspace_mode)
+        )
 
     def history(
         self,

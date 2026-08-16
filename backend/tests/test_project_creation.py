@@ -94,6 +94,9 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     assert (target / ".git").is_dir()
     assert (target / "tests" / "__init__.py").is_file()
     assert (target / "tests" / "test_smoke.py").is_file()
+    assert (target / "start.sh").is_file()
+    assert (target / "start.sh").stat().st_mode & 0o111
+    assert "BACKEND_PORT=\"${BACKEND_PORT:-18300}\"" in (target / "start.sh").read_text(encoding="utf-8")
     assert subprocess.run(
         ["git", "-C", str(target), "branch", "--show-current"],
         capture_output=True,
@@ -163,6 +166,9 @@ def test_new_project_persists_one_time_backend_architecture_configuration(
     assert (target / "backend" / "service" / "dailyjournal_service.py").is_file()
     assert (target / "backend" / "mapper" / "__init__.py").is_file()
     assert (target / "backend" / "utils" / "__init__.py").is_file()
+    assert (target / "backend" / "requirements.txt").is_file()
+    assert "-r backend/requirements.txt" in (target / "requirements.txt").read_text(encoding="utf-8")
+    assert "fastapi" in (target / "backend" / "requirements.txt").read_text(encoding="utf-8")
     assert not (target / "backend" / "mapper" / "database_entity.py").exists()
     assert not (target / "backend" / "utils" / "capability.py").exists()
     stored = json.loads(registry_path.read_text(encoding="utf-8"))

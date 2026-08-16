@@ -40,6 +40,7 @@ export function createProject(payload: {
   validation_options: string[];
   knowledge_actor_id: string;
   backend_architecture_enabled?: boolean;
+  workspace_mode?: "branch" | "worktree";
 }): Promise<ProjectData> {
   return apiRequest<ProjectData>("/api/projects", {
     method: "POST",
@@ -52,6 +53,16 @@ export function deleteProject(projectId: string): Promise<{ project_id: string; 
     `/api/projects/${encodeURIComponent(projectId)}`,
     { method: "DELETE" },
   );
+}
+
+export function updateProjectWorkspaceMode(
+  projectId: string,
+  workspace_mode: "branch" | "worktree",
+): Promise<ProjectData> {
+  return apiRequest<ProjectData>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ workspace_mode }),
+  });
 }
 
 export function getCapabilities(): Promise<HarnessCapabilitiesData> {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +42,7 @@ class ProjectData(BaseModel):
     publish_repository_name: str = ""
     publish_branch: str = ""
     backend_architecture_enabled: bool = False
+    workspace_mode: Literal["branch", "worktree"] = "branch"
     backend_architecture_knowledge_id: str = "TK-DEC-001"
     backend_architecture_status: str = "disabled"
     backend_architecture_snapshot_sha256: str = ""

@@ -229,6 +229,7 @@ export interface ProjectData {
   backend_architecture_knowledge_id?: string;
   backend_architecture_status?: string;
   backend_architecture_snapshot_sha256?: string;
+  workspace_mode?: "branch" | "worktree";
 }
 
 export interface HistoryItemData {

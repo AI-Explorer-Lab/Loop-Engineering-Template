@@ -1,4 +1,4 @@
-"""Create and verify one isolated Git branch/worktree per task."""
+"""Create and verify one task branch, optionally backed by a worktree."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ class WorkspaceInfo:
     worktree_relative_path: str
     source_worktree_was_dirty: bool
     created_at: str
+    workspace_mode: str = "worktree"
 
     def manifest(self) -> dict[str, Any]:
         try:
@@ -46,6 +47,7 @@ class WorkspaceInfo:
                 "worktree_relative_path": self.worktree_relative_path,
                 "protected_branches": list(PROTECTED_BRANCHES),
                 "source_worktree_was_dirty": self.source_worktree_was_dirty,
+                "workspace_mode": self.workspace_mode,
             },
             "runtime": {
                 "codex_sdk_version": sdk_version,
@@ -78,15 +80,25 @@ class WorkspaceInfo:
                 repository.get("source_worktree_was_dirty", False)
             ),
             created_at=str(data.get("created_at") or utc_now_iso()),
+            workspace_mode=str(repository.get("workspace_mode", "worktree")),
         )
 
 
 class WorkspaceManager:
     """Own the control-repository operations that Codex must never perform."""
 
-    def __init__(self, control_repo_root: str | Path, *, base_ref: str = "HEAD") -> None:
+    def __init__(
+        self,
+        control_repo_root: str | Path,
+        *,
+        base_ref: str = "HEAD",
+        workspace_mode: str = "worktree",
+    ) -> None:
         self.control_repo_root = Path(control_repo_root).expanduser().resolve()
         self.base_ref = str(base_ref or "HEAD")
+        self.workspace_mode = str(workspace_mode or "worktree").strip().lower()
+        if self.workspace_mode not in {"branch", "worktree"}:
+            raise ValueError("workspace_mode must be 'branch' or 'worktree'")
         self.worktrees_root = self.control_repo_root / ".codex-orchestrator/worktrees"
 
     def create(self, task: TaskSpec) -> WorkspaceInfo:
@@ -98,17 +110,27 @@ class WorkspaceManager:
         source_dirty = bool(
             self._git("status", "--short", "--untracked-files=all").strip()
         )
+        if self.workspace_mode == "branch" and source_dirty:
+            raise InfrastructureError(
+                "branch workspace mode requires a clean project directory before starting a task"
+            )
         task_branch = f"codex/{task.task_id}"
         if task_branch in PROTECTED_BRANCHES:
             raise InfrastructureError("Task branch resolves to a protected branch")
         if self._branch_exists(task_branch):
             raise InfrastructureError(f"Task branch already exists: {task_branch}")
 
-        worktree = self.worktrees_root / task.task_id
-        if worktree.exists():
-            raise InfrastructureError(f"Task worktree already exists: {worktree}")
-        self.worktrees_root.mkdir(parents=True, exist_ok=True)
-        self._git("worktree", "add", "-b", task_branch, str(worktree), base_commit)
+        if self.workspace_mode == "branch":
+            self._git("switch", "-c", task_branch, base_commit)
+            worktree = self.control_repo_root
+            relative_path = "."
+        else:
+            worktree = self.worktrees_root / task.task_id
+            if worktree.exists():
+                raise InfrastructureError(f"Task worktree already exists: {worktree}")
+            self.worktrees_root.mkdir(parents=True, exist_ok=True)
+            self._git("worktree", "add", "-b", task_branch, str(worktree), base_commit)
+            relative_path = worktree.relative_to(self.control_repo_root).as_posix()
 
         info = WorkspaceInfo(
             task_id=task.task_id,
@@ -116,11 +138,10 @@ class WorkspaceManager:
             base_commit=base_commit,
             task_branch=task_branch,
             worktree=worktree.resolve(),
-            worktree_relative_path=worktree.relative_to(
-                self.control_repo_root
-            ).as_posix(),
+            worktree_relative_path=relative_path,
             source_worktree_was_dirty=source_dirty,
             created_at=utc_now_iso(),
+            workspace_mode=self.workspace_mode,
         )
         self.verify(info, require_clean=True)
         return info

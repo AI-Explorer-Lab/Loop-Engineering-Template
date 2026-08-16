@@ -269,6 +269,7 @@ def _configured_harness_runtime(
             ),
             project_name=str(project.get("name", project.get("project_id", "business"))),
         ),
+        workspace_mode=str(project.get("workspace_mode", "branch")),
     )
 
 

@@ -16,7 +16,7 @@ from ..domain.res import (
     NotificationSettingsData,
     ProjectData,
 )
-from ..domain.req import NotificationSettingsRequest, ProjectCreateRequest
+from ..domain.req import NotificationSettingsRequest, ProjectCreateRequest, ProjectUpdateRequest
 from ..exceptions.business_exception import BusinessException
 from ..service.platform_service import PlatformService
 
@@ -59,6 +59,7 @@ async def create_project(
             validation_options=payload.validation_options,
             knowledge_actor_id=payload.knowledge_actor_id,
             backend_architecture_enabled=payload.backend_architecture_enabled,
+            workspace_mode=payload.workspace_mode,
         )
     )
 
@@ -69,6 +70,19 @@ async def delete_project(project_id: str, request: Request) -> ApiResponse[dict[
         data=await run_in_threadpool(
             _service(request).delete_project,
             project_id,
+        )
+    )
+
+
+@router.patch("/projects/{project_id}", response_model=ApiResponse[ProjectData])
+async def update_project(
+    project_id: str, payload: ProjectUpdateRequest, request: Request
+) -> ApiResponse[ProjectData]:
+    return ApiResponse(
+        data=await run_in_threadpool(
+            _service(request).update_workspace_mode,
+            project_id,
+            payload.workspace_mode,
         )
     )
 

@@ -52,6 +52,8 @@ def provision_git_project(
     validation_options: list[str] | None = None,
     required_paths: list[str] | None = None,
     backend_architecture_enabled: bool = False,
+    frontend_port: int = 8300,
+    backend_port: int = 18300,
     commit_initial_state: bool = True,
 ) -> None:
     """Create one new Git project with tracked Harness configuration."""
@@ -99,6 +101,14 @@ def provision_git_project(
                 path,
                 project_name=project_name,
             )
+            _write_backend_requirements(path)
+        _write_start_script(
+            path,
+            project_name=project_name,
+            project_type=project_type,
+            frontend_port=frontend_port,
+            backend_port=backend_port,
+        )
         missing = [
             relative
             for relative in required_paths or []
@@ -176,6 +186,7 @@ def _write_project_scaffold(
         }
         scripts = package["scripts"]
         dev_dependencies = package["devDependencies"]
+        scripts["dev"] = "vite --host 127.0.0.1"
         if "frontend_tests" in selected:
             scripts["test"] = "vitest run"
             dev_dependencies.update(
@@ -227,6 +238,102 @@ def _write_project_scaffold(
             json.dumps(package, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+
+
+def _write_backend_requirements(path: Path) -> None:
+    requirements = path / "requirements.txt"
+    if requirements.exists():
+        return
+    requirements.write_text(
+        "-r backend/requirements.txt\npytest>=8.0,<10.0\n",
+        encoding="utf-8",
+    )
+
+
+def _write_start_script(
+    path: Path,
+    *,
+    project_name: str,
+    project_type: str,
+    frontend_port: int,
+    backend_port: int,
+) -> None:
+    normalized_type = str(project_type).strip().lower()
+    has_frontend = normalized_type in {"frontend", "fullstack"}
+    has_backend = normalized_type in {"python", "fullstack"}
+    if not has_frontend and not has_backend:
+        raise ProjectProvisioningError(
+            f"unsupported project type for start.sh: {project_type}"
+        )
+
+    environment_name = f"loop-project-{project_name.lower()}"
+    lines = [
+        "#!/usr/bin/env bash",
+        "",
+        "set -Eeuo pipefail",
+        "",
+        'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        f'FRONTEND_PORT="${{FRONTEND_PORT:-{int(frontend_port)}}}"',
+        f'BACKEND_PORT="${{BACKEND_PORT:-{int(backend_port)}}}"',
+        'FRONTEND_PID=""',
+        'BACKEND_PID=""',
+        "",
+        'fail() { printf \'启动失败：%s\\n\' "$1" >&2; exit 1; }',
+        "",
+        "cleanup() {",
+        "  local exit_code=$?",
+        "  trap - EXIT INT TERM",
+        '  for pid in "${FRONTEND_PID}" "${BACKEND_PID}"; do',
+        '    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then kill "${pid}" 2>/dev/null || true; fi',
+        "  done",
+        '  for pid in "${FRONTEND_PID}" "${BACKEND_PID}"; do',
+        '    if [[ -n "${pid}" ]]; then wait "${pid}" 2>/dev/null || true; fi',
+        "  done",
+        '  exit "${exit_code}"',
+        "}",
+        "",
+        "trap cleanup EXIT",
+        "trap 'exit 130' INT",
+        "trap 'exit 143' TERM",
+    ]
+    if has_frontend:
+        lines.extend(
+            [
+                "command -v npm >/dev/null 2>&1 || fail \"未找到 npm。\"",
+                '[[ -x "${ROOT}/frontend/node_modules/.bin/vite" ]] || fail "前端依赖未安装，请先运行 npm ci --prefix frontend。"',
+                "(",
+                '  cd "${ROOT}/frontend"',
+                '  npm run dev -- --port "${FRONTEND_PORT}" --strictPort',
+                ") &",
+                "FRONTEND_PID=$!",
+            ]
+        )
+    if has_backend:
+        lines.extend(
+            [
+                "command -v conda >/dev/null 2>&1 || fail \"未找到 conda。\"",
+                f"conda run -n {environment_name} python -c 'import fastapi, uvicorn' >/dev/null 2>&1 || fail \"后端 Conda 环境缺少 FastAPI/Uvicorn 依赖。\"",
+                f'conda run -n {environment_name} python -m uvicorn backend.main:app --host 127.0.0.1 --port "${{BACKEND_PORT}}" &',
+                "BACKEND_PID=$!",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            'printf \'项目已启动：前端端口 %s，后端端口 %s\\n\' "${FRONTEND_PORT}" "${BACKEND_PORT}"',
+            "",
+            "while true; do",
+            '  for pid in "${FRONTEND_PID}" "${BACKEND_PID}"; do',
+            '    if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then wait "${pid}" || true; exit 1; fi',
+            "  done",
+            "  sleep 1",
+            "done",
+            "",
+        ]
+    )
+    start_script = path / "start.sh"
+    start_script.write_text("\n".join(lines), encoding="utf-8")
+    start_script.chmod(0o755)
 
 
 def _run_git(path: Path, *args: str) -> None:

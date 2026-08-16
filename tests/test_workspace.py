@@ -86,6 +86,25 @@ def test_duplicate_task_and_wrong_worktree_identity_are_rejected(
         manager.verify(workspace)
 
 
+def test_branch_mode_uses_project_root_without_creating_a_worktree(
+    repository: Path,
+) -> None:
+    workspace = WorkspaceManager(repository, workspace_mode="branch").create(
+        task("branch-mode-test")
+    )
+
+    assert workspace.workspace_mode == "branch"
+    assert workspace.worktree == repository.resolve()
+    assert workspace.worktree_relative_path == "."
+    assert not (repository / ".codex-orchestrator" / "worktrees").exists()
+    assert git(repository, "rev-parse", "--abbrev-ref", "HEAD") == (
+        "codex/branch-mode-test"
+    )
+    WorkspaceManager(repository, workspace_mode="branch").verify(
+        workspace, require_clean=True
+    )
+
+
 def test_harness_runtime_is_excluded_but_other_untracked_files_are_rejected(
     tmp_path: Path,
 ) -> None:

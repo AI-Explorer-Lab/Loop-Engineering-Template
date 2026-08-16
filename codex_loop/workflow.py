@@ -84,6 +84,7 @@ class OrchestrationWorkflow:
         validation_profile: ValidationProfile | Mapping[str, object] | None = None,
         backend_architecture_bootstrap: BackendArchitectureBootstrap | None = None,
         include_memory: bool = True,
+        workspace_mode: str = "worktree",
     ) -> None:
         self.control_repo_root = Path(repo_root).expanduser().resolve()
         self.repo_root = self.control_repo_root  # compatibility alias
@@ -111,13 +112,16 @@ class OrchestrationWorkflow:
         self.knowledge_actor_id = str(knowledge_actor_id)
         self.backend_architecture_bootstrap = backend_architecture_bootstrap
         self.include_memory = bool(include_memory)
+        self.workspace_mode = str(workspace_mode or "worktree").strip().lower()
         self.validation_profile = (
             validation_profile
             if isinstance(validation_profile, ValidationProfile)
             else ValidationProfile.from_mapping(validation_profile)
         )
         self.workspace_manager = WorkspaceManager(
-            self.control_repo_root, base_ref=base_ref
+            self.control_repo_root,
+            base_ref=base_ref,
+            workspace_mode=self.workspace_mode,
         )
 
     def start(self, task: TaskSpec) -> RunResult:
