@@ -1157,6 +1157,7 @@ class OrchestrationWorkflow:
                 task_id=task.task_id,
                 assembler=self.context_assembler,
                 actor=self.knowledge_actor_id,
+                worktree=state.repo_root,
                 event_sink=audit.append,
             )
         generation = self.context_assembler.assemble(
@@ -1203,6 +1204,7 @@ class OrchestrationWorkflow:
                     task_id=task.task_id,
                     assembler=self.context_assembler,
                     actor=self.knowledge_actor_id,
+                    worktree=state.repo_root,
                     event_sink=audit.append,
                 )
         specification = self.context_assembler.assemble(

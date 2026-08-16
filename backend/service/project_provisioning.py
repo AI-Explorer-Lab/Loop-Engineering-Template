@@ -28,6 +28,11 @@ PROJECT_GITIGNORE = """# Sensitive credentials and temporary runtime files
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Node
+node_modules/
+dist/
+coverage/
 """
 
 

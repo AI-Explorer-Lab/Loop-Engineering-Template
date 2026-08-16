@@ -558,6 +558,78 @@ def test_audit_fails_closed_if_an_outside_command_succeeds(
     assert events[-1]["payload"]["target"] == outside_target.as_posix()
 
 
+def test_audit_does_not_treat_sed_address_script_as_outside_path(
+    repository: Path,
+) -> None:
+    info = workspace(repository, "sed-address-test")
+    audit = AuditRecorder(
+        repository / ".codex-orchestrator/runs/sed-address-test",
+        info.worktree,
+        info.base_commit,
+    )
+
+    audit.record_codex_notification(
+        1,
+        SimpleNamespace(
+            method="item/completed",
+            payload={
+                "item": {
+                    "type": "commandExecution",
+                    "command": (
+                        "git ls-files --cached --others --exclude-standard | "
+                        "sed -n '/^frontend\\/dist\\//p;/^frontend\\/node_modules\\/\\.vite\\//p'"
+                    ),
+                    "status": "completed",
+                    "exitCode": 0,
+                    "aggregatedOutput": "frontend/dist/index.html\n",
+                }
+            },
+        ),
+    )
+
+    events = [
+        json.loads(line)
+        for line in audit.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert not any(event["type"] == "permission.denied" for event in events)
+
+
+def test_audit_does_not_treat_quoted_sed_address_script_as_outside_path(
+    repository: Path,
+) -> None:
+    info = workspace(repository, "quoted-sed-address-test")
+    audit = AuditRecorder(
+        repository / ".codex-orchestrator/runs/quoted-sed-address-test",
+        info.worktree,
+        info.base_commit,
+    )
+
+    audit.record_codex_notification(
+        1,
+        SimpleNamespace(
+            method="item/completed",
+            payload={
+                "item": {
+                    "type": "commandExecution",
+                    "command": (
+                        "sed -n '/\"node_modules\\/vue\": {/,/^[[:space:]]*},/p' "
+                        "frontend/package-lock.json"
+                    ),
+                    "status": "completed",
+                    "exitCode": 0,
+                    "aggregatedOutput": "node_modules/vue",
+                }
+            },
+        ),
+    )
+
+    events = [
+        json.loads(line)
+        for line in audit.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert not any(event["type"] == "permission.denied" for event in events)
+
+
 def test_audit_excludes_harness_runtime_without_gitignore(
     unignored_repository: Path,
 ) -> None:

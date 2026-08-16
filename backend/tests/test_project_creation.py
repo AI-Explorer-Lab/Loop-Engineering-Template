@@ -76,7 +76,10 @@ def test_new_project_endpoint_creates_git_project_and_persists_registration(
     assert created["repo_root"] == str(target)
     assert created["publish_auto_create_remote"] is True
     assert (target / ".gitignore").is_file()
-    assert ".codex-runtime/" in (target / ".gitignore").read_text(encoding="utf-8")
+    project_gitignore = (target / ".gitignore").read_text(encoding="utf-8")
+    assert ".codex-runtime/" in project_gitignore
+    assert "node_modules/" in project_gitignore
+    assert "dist/" in project_gitignore
     harness_config = target / ".harness" / "project.json"
     assert harness_config.is_file()
     assert ".harness/" not in (target / ".gitignore").read_text(encoding="utf-8")

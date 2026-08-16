@@ -264,6 +264,7 @@ class ProjectRegistry:
             root,
             enabled=backend_architecture_enabled,
             knowledge_id=backend_architecture_knowledge_id,
+            project_name=str(item["name"]),
         )
         harness = HarnessRuntime(
             root,
